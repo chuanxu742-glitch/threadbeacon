@@ -3,6 +3,10 @@
 // 设计原则：把合规约束编码进类型，而不是写在文档里。
 // 依据 docs/GDPR架构边界.md §7 —— data minimization by architecture。
 
+import type { AuthMode } from './http.js';
+
+export type { AuthMode };
+
 /** 目标平台。与「供应商」是两个独立维度，不要混进同一个枚举。 */
 export type Platform =
   | 'bluesky'
@@ -79,13 +83,17 @@ export interface Provenance {
   /** 是否已检查并遵守 robots.txt / ai.txt。EDPB Guidelines 03/2026 视其为合理预期的指示信号。 */
   readonly robotsChecked: boolean;
   /**
-   * 字面量 false，不是笔误。
+   * 取数时使用的凭据档位。
    *
-   * 本项目在任何路径下都不做登录态采集，类型系统在此固定该事实：
+   * AuthMode 只有 'anonymous' 与 'app-credential' 两个取值 ——
+   * 用户会话凭据在类型层面不可表达，这是本项目的硬边界：
    * Meta v. Voyager Labs（登录态 + 假账号）被判永久禁令，
    * Meta v. Bright Data（登出抓公开数据）胜诉。见 docs/行业合规范式.md §4。
+   *
+   * 注意 'app-credential' 指平台签发给应用的凭据（官方 API），不是用户身份 ——
+   * 官方 API 是最合规的取数路径，与「登录态采集」性质完全不同。
    */
-  readonly authenticated: false;
+  readonly auth: AuthMode;
 }
 
 /**

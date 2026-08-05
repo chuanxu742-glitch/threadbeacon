@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { AuthenticatedRequestError, PoliteHttpClient, PolitePool } from '../src/providers/http.js';
+import {
+  PoliteHttpClient,
+  PolitePool,
+  SessionCredentialError,
+  UnexpectedCredentialError,
+} from '../src/providers/http.js';
 import { ProviderRegistry } from '../src/providers/registry.js';
 import type { IDataProvider, Platform, ProviderKind, TextBundle } from '../src/providers/types.js';
 import { textsOf } from '../src/providers/types.js';
@@ -20,7 +25,7 @@ function stubProvider(
       fetchedAt: '2026-08-05T00:00:00.000Z',
       legalBasis: 'test',
       robotsChecked: true,
-      authenticated: false,
+      auth: 'anonymous',
     },
   };
   return {
@@ -38,27 +43,45 @@ function stubProvider(
   };
 }
 
-describe('PoliteHttpClient', () => {
-  it('拒绝携带 Cookie 的请求', async () => {
+describe('PoliteHttpClient 凭据策略', () => {
+  it('anonymous 模式拒绝 Cookie', async () => {
     const http = new PoliteHttpClient();
     await expect(http.getJson('https://example.com/a', { Cookie: 'sid=1' })).rejects.toThrow(
-      AuthenticatedRequestError,
+      SessionCredentialError,
     );
   });
 
-  it('拒绝携带 Authorization 的请求，且大小写不敏感', async () => {
+  it('app-credential 模式同样拒绝 Cookie —— 用户会话凭据在任何模式下都不允许', async () => {
+    const http = new PoliteHttpClient({ authMode: 'app-credential' });
+    await expect(http.getJson('https://example.com/a', { cookie: 'sid=1' })).rejects.toThrow(
+      SessionCredentialError,
+    );
+  });
+
+  it('anonymous 模式拒绝 Authorization，且大小写不敏感', async () => {
     const http = new PoliteHttpClient();
     await expect(
-      http.getJson('https://example.com/a', { authorization: 'Bearer x' }),
-    ).rejects.toThrow(AuthenticatedRequestError);
+      http.getJson('https://example.com/a', { Authorization: 'Bearer x' }),
+    ).rejects.toThrow(UnexpectedCredentialError);
+  });
+
+  it('app-credential 模式放行 Authorization —— 官方 API 是最合规的取数路径', async () => {
+    const http = new PoliteHttpClient({ authMode: 'app-credential' });
+    // 只验证凭据校验这一关放行；真实网络调用不在单测范围内
+    await expect(
+      http.getJson('http://127.0.0.1:9/never', { authorization: 'Bearer x' }),
+    ).rejects.not.toThrow(UnexpectedCredentialError);
   });
 
   it('放行不含凭据的普通头', async () => {
     const http = new PoliteHttpClient();
-    // 只验证凭据校验这一关；真实网络调用不在单测范围内
     await expect(
       http.getJson('http://127.0.0.1:9/never', { 'user-agent': 'caiji/0.1' }),
-    ).rejects.not.toThrow(AuthenticatedRequestError);
+    ).rejects.not.toThrow(SessionCredentialError);
+  });
+
+  it('默认档位是 anonymous', () => {
+    expect(new PoliteHttpClient().authMode).toBe('anonymous');
   });
 });
 

@@ -15,14 +15,20 @@ License: Apache-2.0 · Node ≥ 22 · TypeScript strict
 
 这三条已经编码进类型系统与运行时，不是文档约定：
 
-1. **不做登录态采集。** `PoliteHttpClient` 拒绝任何带 `Cookie` / `Authorization` 的请求，
-   `Provenance.authenticated` 是字面量 `false` 类型。
+1. **不做登录态采集。** `Cookie` 在任何模式下都被拒绝——那是用户会话标记。
+   `AuthMode` 只有 `anonymous` 与 `app-credential` 两个取值，用户身份在类型层面不可表达。
    依据：Meta v. Bright Data（登出抓公开数据）胜诉，Meta v. Voyager Labs（登录态 + 假账号）被判永久禁令。
+   > 注意 `app-credential` 指平台签发给应用的凭据（Reddit OAuth、YouTube API key），
+   > 官方 API 是**最合规**的取数路径，与登录态采集性质完全不同。
 2. **标识符在 ingest 阶段丢弃。** `SourceItem` 类型里没有 handle / userID / permalink /
    精确时间戳 / 坐标的位置，`buildSourceItem()` 是唯一构造入口且强制脱敏。
    脱敏用**占位符替换**，不用 hash —— hash 属假名化，仍是个人数据。
 3. **簇规模低于 10 不成簇。** `K_ANONYMITY_FLOOR = 10`，低于此值 `cluster()` 抛错。
    小簇会击穿 EDPB 匿名化三重测试里的 No Inference。
+
+产物侧还有一道闸：`containsVerbatim()` 在写入报告前检查 LLM 是否逐字回显了原文，
+命中即替换该表述并计数。阈值按文字体系区分（CJK 12 字 / 拉丁 25 字）——
+12 个汉字通常已足以被搜索引擎回溯到原帖。
 
 完整依据见 `docs/GDPR架构边界.md`。
 
@@ -30,18 +36,51 @@ License: Apache-2.0 · Node ≥ 22 · TypeScript strict
 
 ```
 src/
-  providers/     数据接入层
-    types.ts       Platform × ProviderKind 二维契约、TextBundle、Provenance
-    registry.ts    按 (platform, kind) 索引，按合规优先级 resolve
-    http.ts        限流 + 凭据拦截的 HTTP 客户端
+  providers/       数据接入层
+    types.ts         Platform × ProviderKind 二维契约、TextBundle、Provenance
+    registry.ts      按 (platform, kind) 索引，按合规优先级 resolve
+    http.ts          限流 + 凭据分档的 HTTP 客户端
+    base.ts          provenance 构造与脱敏的唯一出口
+    bluesky.ts       AT Protocol 公开 App View（无需凭据）
+    reddit.ts        官方 Data API（OAuth client_credentials）
+    youtube.ts       Data API v3
   privacy/
-    minimize.ts    PII 脱敏与数据最小化，SourceItem 的唯一构造入口
-  llm/           LLM 接入层，OpenAI 兼容 / Anthropic Messages 双线路
+    minimize.ts      PII 脱敏与数据最小化，SourceItem 的唯一构造入口
+  llm/             LLM 接入层，OpenAI 兼容 / Anthropic Messages 双线路
   clustering/      语义聚类（源自 SeekMoney-ai，MIT，见 NOTICE）
+  pipeline/
+    analyze.ts       端到端编排
+    report.ts        产物类型与逐字引用检查
 tests/
-docs/            调研与设计文档
-reference/       上游只读参考，不入版本库
+docs/              调研与设计文档
+reference/         上游只读参考，不入版本库
 ```
+
+## 跑一次分析
+
+```ts
+import { analyze } from './src/pipeline/analyze.js';
+import { BlueskyProvider } from './src/providers/bluesky.js';
+import { PoliteHttpClient } from './src/providers/http.js';
+import { ProviderRegistry } from './src/providers/registry.js';
+import { ClusteringService } from './src/clustering/ClusteringService.js';
+import { createLlmClient } from './src/llm/index.js';
+
+const registry = new ProviderRegistry().register(
+  new BlueskyProvider({ http: new PoliteHttpClient() }),   // 无需任何凭据
+);
+
+const report = await analyze(
+  { registry, clustering: new ClusteringService(), llm: createLlmClient({ apiKey: KEY, model: 'claude-opus-5' }) },
+  { platform: 'bluesky', keyword: '续航', limit: 200 },
+);
+
+// report.painPoints 只含主题、改写后的概括、簇规模、关键词、严重度
+// 不含原文、不含单条记录、不含任何标识符
+console.log(report.dataQuality, report.stats.redactedSummaries);
+```
+
+数据源凭据见 `.env.example`。Bluesky 零成本零凭据，适合先跑通闭环。
 
 ## LLM 接入
 
@@ -99,25 +138,25 @@ git clone https://github.com/liangdabiao/SeekMoney-ai reference/SeekMoney-ai
 ## 当前进度
 
 **已完成**
-- 项目骨架：TypeScript strict + `noUncheckedIndexedAccess`、vitest、55 个测试全绿
+- 项目骨架：TypeScript strict + `noUncheckedIndexedAccess`、vitest、84 个测试全绿
 - 数据接入层契约：平台与供应商拆成两个维度，获取模式区分 `searchAll` / `fetchOwned`
-- 合规护栏：凭据拦截、按 host 平滑限流（≤1 QPS）、429/403 熔断
+- 合规护栏：凭据分档（Cookie 恒禁 / 应用级凭据按模式放行）、按 host 平滑限流（≤1 QPS）、429/403 熔断
 - 隐私最小化层：结构化 PII 正则脱敏 + 可插拔 NER 接口、时间降采样、地理粒度校验
 - 聚类层：从上游复用并加固（k-匿名下限、修复就地排序破坏 indices 对应关系的缺陷、
   补齐未检查的数组下标访问、ZhipuAI 响应缺字段时的报错）
-- LLM 接入层：url/key/model 三项配置，OpenAI 兼容与 Anthropic Messages 双线路，
-  各用官方 SDK，端口可注入因而全流程可离线测试
+- LLM 接入层：url/key/model 三项配置，OpenAI 兼容与 Anthropic Messages 双线路
+- 三个 provider：Bluesky（开放协议）、Reddit（官方 API + OAuth）、YouTube（Data API v3）
+- 编排层：provider → 聚类 → LLM 归纳 → 只持久化聚类级产物，含逐字引用闸门
 
 **下一步**
-1. `BlueskyProvider` —— AT Protocol firehose，开放免费，无授权门槛，最适合先跑通闭环
-2. `RedditProvider` —— 官方 API，注意免费档仅限非商用，商用需签约
-3. `YouTubeProvider` —— Data API v3，注意 `search.list` 自 2026-06-01 起独立配额约 100 次/天
-4. 编排层：provider → 脱敏 → 聚类 → 分析 → 只持久化聚类级输出
-5. 接 Presidio 本地部署补齐姓名/地名等无固定结构的 PII
+1. 接 Presidio 本地部署，补齐姓名/地名等无固定结构的 PII（当前只有正则层）
+2. `fetchOwned` 模式的 creator API provider —— 中国平台唯一的合规路径
+3. 持久化与调度（APScheduler 或任务计划触发 + Redis 队列，暂不引入独立调度器）
+4. 合规文书与 Art 27 EU 代表（非代码，但商用部署前必须有）
 
 **平台可行性**：小红书、B站、快手、微信视频号无合规内容 API；
 Meta/Instagram 无商业数据许可通道；TikTok 需先过 Marketing Partner 审核。
-详见 `docs/行业合规范式.md` §5。
+详见 `docs/行业合规范式.md` §5 与 `DISCLAIMER.md` §4。
 
 ## 文档
 
