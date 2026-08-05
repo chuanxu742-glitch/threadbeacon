@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 import { ClusteringService } from '../src/clustering/ClusteringService.js';
 import { analyze } from '../src/pipeline/analyze.js';
 import { containsVerbatim, gradeQuality } from '../src/pipeline/report.js';
@@ -28,7 +28,7 @@ function fakeProvider(texts: readonly string[]): IDataProvider {
       mode: 'searchAll',
       fetchedAt: '2026-08-05T00:00:00.000Z',
       legalBasis: 'test',
-      robotsChecked: true,
+      robots: 'not-applicable',
       auth: 'anonymous',
     },
   };
@@ -40,6 +40,7 @@ function fakeProvider(texts: readonly string[]): IDataProvider {
       modes: ['searchAll'],
       canFetchComments: false,
       legalBasis: 'test',
+      robots: 'not-applicable',
     },
     searchAll: async () => bundle,
     checkAvailability: async () => true,
@@ -145,11 +146,57 @@ describe('analyze 端到端', () => {
     expect(report.painPoints.every((p) => p.severity >= 0 && p.severity <= 5)).toBe(true);
   });
 
-  it('平台没有 searchAll provider 时给出可操作的报错', async () => {
+  it('平台完全没有可用 provider 时给出可操作的报错', async () => {
+    const llm = fakeLlm(() => goodJson('x'));
+    await expect(analyze(deps(llm), { ...req, platform: 'xiaohongshu' })).rejects.toThrow(
+      /既没有可用的 searchAll，也没有 streamLive/,
+    );
+  });
+
+  it('显式要求 searchAll 时不静默回退到实时流', async () => {
     const llm = fakeLlm(() => goodJson('x'));
     await expect(
-      analyze(deps(llm), { ...req, platform: 'xiaohongshu' }),
+      analyze(deps(llm), { ...req, platform: 'xiaohongshu', mode: 'searchAll' }),
     ).rejects.toThrow(/没有注册支持 searchAll/);
+  });
+
+  it('没有 searchAll 但有 streamLive 时自动回退', async () => {
+    const streamed: TextBundle = {
+      items: [{ text: '续航很差需要频繁充电', timeBucket: '2026-08-05', platform: 'bluesky' }],
+      provenance: {
+        providerId: 'stream',
+        platform: 'bluesky',
+        kind: 'open-protocol',
+        mode: 'streamLive',
+        fetchedAt: '2026-08-05T00:00:00.000Z',
+        legalBasis: 'test',
+        robots: 'not-applicable',
+        auth: 'anonymous',
+      },
+    };
+    const registry = new ProviderRegistry().register({
+      capability: {
+        id: 'stream',
+        platform: 'bluesky',
+        kind: 'open-protocol',
+        modes: ['streamLive'],
+        canFetchComments: false,
+        legalBasis: 'test',
+        robots: 'not-applicable',
+      },
+      streamLive: async () => streamed,
+      checkAvailability: async () => true,
+    });
+    const clustering = new ClusteringService(new FakeEmbeddingProvider(PROBES), {
+      minSamples: 3,
+      unsafeAllowSmallClusters: true,
+    });
+
+    const report = await analyze(
+      { registry, clustering, llm: fakeLlm(() => goodJson('续航')) },
+      req,
+    );
+    expect(report.provenance.mode).toBe('streamLive');
   });
 
   it('样本量小时标记为 exploratory', async () => {

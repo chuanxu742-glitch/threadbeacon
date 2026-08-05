@@ -1,8 +1,26 @@
 // Bluesky provider —— AT Protocol 公开 App View。
 //
-// 这是本项目里合规成本最低的数据源：协议开放、接口公开、无需授权、无配额费用，
-// 因而 kind 是 'open-protocol'，authMode 是 'anonymous'。
-// 见 docs/行业合规范式.md §5 —— 唯一能零成本拿到完整 firehose 的主流社交平台。
+// kind 是 'open-protocol'，authMode 是 'anonymous'。
+// 见 docs/行业合规范式.md §5。
+//
+// ⛔ 本 provider 当前不可用（2026-08-05 实测已复现）
+// -----------------------------------------------------------------------------
+// 同一网络、同一代理下：
+//   app.bsky.actor.getProfile   -> HTTP 200
+//   app.bsky.feed.searchPosts   -> HTTP 403
+// 两者同主机同时刻，因此 403 是**端点级的授权要求**，不是网络或 UA 问题。
+//
+// Bluesky 的会话凭据是 app password，属**用户凭据**，而 AuthMode 刻意不能
+// 表达用户身份（见 DISCLAIMER.md §1）。因此 searchAll 在本项目约束下无解。
+//
+// ✅ 替代方案：BlueskyJetstreamProvider（同目录 bluesky-jetstream.ts）。
+//    Jetstream 实时流无需任何授权，实测连上即收到事件。
+//    代价是只能订阅增量、拿不到历史 —— 那是 'streamLive' 模式。
+//
+// 代码保留是因为它本身是对的：若将来 Bluesky 开放匿名检索，或你自建
+// 一个允许匿名 searchPosts 的 AppView（endpoint 可覆盖），它就能直接用。
+// checkAvailability() 会实际探测，注册前请先调用它。
+// -----------------------------------------------------------------------------
 
 import { BaseProvider, paginate, type BaseProviderDeps } from './base.js';
 import type { RawObservation } from '../privacy/minimize.js';
@@ -36,6 +54,9 @@ export class BlueskyProvider extends BaseProvider {
     modes: ['searchAll'],
     canFetchComments: false,
     legalBasis: 'AT Protocol 公开 App View，协议设计上即面向公开读取，无需授权',
+    // 调用文档化的 XRPC 端点，非网页爬取。
+    // 该站 robots.txt 亦明示 "Crawling the public parts of the API is allowed"。
+    robots: 'not-applicable',
   };
 
   private readonly endpoint: string;
@@ -43,6 +64,24 @@ export class BlueskyProvider extends BaseProvider {
   constructor(opts: BlueskyProviderOptions) {
     super(opts);
     this.endpoint = opts.endpoint ?? DEFAULT_ENDPOINT;
+  }
+
+  /**
+   * 实际探测 searchPosts 是否可匿名调用。
+   *
+   * 基类默认返回 true，那对这个 provider 是误导 —— 它在官方端点上会 403。
+   * 注册前调用此方法，别让不可用的 provider 悄悄进 registry。
+   */
+  override async checkAvailability(): Promise<boolean> {
+    const url = new URL('/xrpc/app.bsky.feed.searchPosts', this.endpoint);
+    url.searchParams.set('q', 'test');
+    url.searchParams.set('limit', '1');
+    try {
+      await this.http.getJson(url.toString());
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async searchAll(query: SearchQuery): Promise<TextBundle> {

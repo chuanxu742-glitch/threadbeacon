@@ -1,4 +1,4 @@
-# caiji
+﻿# caiji
 
 多平台社媒数据采集与聚合分析。采集**公开**内容 → PII 脱敏 → 语义聚类 → 提炼聚合洞察。
 
@@ -36,38 +36,54 @@ License: Apache-2.0 · Node ≥ 22 · TypeScript strict
 
 ```
 src/
-  providers/       数据接入层
-    types.ts         Platform × ProviderKind 二维契约、TextBundle、Provenance
-    registry.ts      按 (platform, kind) 索引，按合规优先级 resolve
-    http.ts          限流 + 凭据分档的 HTTP 客户端
-    base.ts          provenance 构造与脱敏的唯一出口
-    bluesky.ts       AT Protocol 公开 App View（无需凭据）
-    reddit.ts        官方 Data API（OAuth client_credentials）
-    youtube.ts       Data API v3
+  cli.ts             命令行入口（doctor / analyze / list）
+  net/proxy.ts       进程级代理，一并覆盖 LLM SDK 的出站请求
+  providers/         数据接入层
+    types.ts           Platform × ProviderKind 二维契约、TextBundle、Provenance
+    registry.ts        按 (platform, kind) 索引，按合规优先级 resolve
+    http.ts            限流 + 凭据分档的 HTTP 客户端
+    base.ts            provenance 构造与脱敏的唯一出口
+    bluesky-jetstream.ts  AT Protocol 实时流（无需凭据）✅ 实测可用
+    bluesky.ts         AT Protocol 历史检索 ⛔ 实测 403，需用户凭据
+    reddit.ts          官方 Data API（OAuth client_credentials）
+    youtube.ts         Data API v3
   privacy/
-    minimize.ts      PII 脱敏与数据最小化，SourceItem 的唯一构造入口
-  llm/             LLM 接入层，OpenAI 兼容 / Anthropic Messages 双线路
-  clustering/      语义聚类（源自 SeekMoney-ai，MIT，见 NOTICE）
+    minimize.ts        PII 脱敏与数据最小化，SourceItem 的唯一构造入口
+  llm/               LLM 接入层，OpenAI 兼容 / Anthropic Messages 双线路
+  clustering/        语义聚类（源自 SeekMoney-ai，MIT，见 NOTICE）
   pipeline/
-    analyze.ts       端到端编排
-    report.ts        产物类型与逐字引用检查
+    analyze.ts         端到端编排
+    report.ts          产物类型与逐字引用检查
+    store.ts           落盘：只写聚类级产物
 tests/
-docs/              调研与设计文档
-reference/         上游只读参考，不入版本库
+docs/                调研与设计文档
+reference/           上游只读参考，不入版本库
 ```
+
+## 命令行
+
+```bash
+pnpm doctor                                # 检查数据源可达性与凭据配置
+pnpm cli analyze bluesky "battery life" 50  # 跑一次分析并落盘
+pnpm cli list                              # 列出已有报告
+```
+
+网络受限环境请设置 `HTTPS_PROXY`——入口会把它装成全局 dispatcher，
+一并覆盖 LLM SDK 的出站请求（见 `src/net/proxy.ts`）。
 
 ## 跑一次分析
 
 ```ts
 import { analyze } from './src/pipeline/analyze.js';
-import { BlueskyProvider } from './src/providers/bluesky.js';
+import { BlueskyJetstreamProvider } from './src/providers/bluesky-jetstream.js';
 import { PoliteHttpClient } from './src/providers/http.js';
 import { ProviderRegistry } from './src/providers/registry.js';
 import { ClusteringService } from './src/clustering/ClusteringService.js';
 import { createLlmClient } from './src/llm/index.js';
 
+// Bluesky 的历史检索需用户凭据（实测 403），用无需授权的实时流
 const registry = new ProviderRegistry().register(
-  new BlueskyProvider({ http: new PoliteHttpClient() }),   // 无需任何凭据
+  new BlueskyJetstreamProvider({ http: new PoliteHttpClient() }),
 );
 
 const report = await analyze(
@@ -80,7 +96,8 @@ const report = await analyze(
 console.log(report.dataQuality, report.stats.redactedSummaries);
 ```
 
-数据源凭据见 `.env.example`。Bluesky 零成本零凭据，适合先跑通闭环。
+数据源凭据见 `.env.example`。Bluesky Jetstream 零成本零凭据，适合先跑通闭环——
+代价是只能订阅实时增量，拿不到历史（` mode: 'streamLive' `）。
 
 ## LLM 接入
 
@@ -138,21 +155,31 @@ git clone https://github.com/liangdabiao/SeekMoney-ai reference/SeekMoney-ai
 ## 当前进度
 
 **已完成**
-- 项目骨架：TypeScript strict + `noUncheckedIndexedAccess`、vitest、84 个测试全绿
-- 数据接入层契约：平台与供应商拆成两个维度，获取模式区分 `searchAll` / `fetchOwned`
-- 合规护栏：凭据分档（Cookie 恒禁 / 应用级凭据按模式放行）、按 host 平滑限流（≤1 QPS）、429/403 熔断
+- 项目骨架：TypeScript strict + `noUncheckedIndexedAccess`、vitest、107 个测试全绿
+- 数据接入层契约：平台与供应商拆成两个维度，获取模式区分 `searchAll` / `fetchOwned` / `streamLive`
+- 合规护栏：凭据分档（Cookie 恒禁 / 应用级凭据按模式放行）、按 host 平滑限流（≤1 QPS）、
+  429/503 退避重试而 **403 快速失败**（二者语义不同，混在一起会误诊）
 - 隐私最小化层：结构化 PII 正则脱敏 + 可插拔 NER 接口、时间降采样、地理粒度校验
 - 聚类层：从上游复用并加固（k-匿名下限、修复就地排序破坏 indices 对应关系的缺陷、
   补齐未检查的数组下标访问、ZhipuAI 响应缺字段时的报错）
 - LLM 接入层：url/key/model 三项配置，OpenAI 兼容与 Anthropic Messages 双线路
-- 三个 provider：Bluesky（开放协议）、Reddit（官方 API + OAuth）、YouTube（Data API v3）
-- 编排层：provider → 聚类 → LLM 归纳 → 只持久化聚类级产物，含逐字引用闸门
+- 四个 provider：Bluesky Jetstream（实时流，零凭据）、Bluesky 检索（需凭据，当前不可用）、
+  Reddit（官方 API + OAuth）、YouTube（Data API v3）
+- 编排层：按模式自动选路，provider → 聚类 → LLM 归纳 → 只持久化聚类级产物
+- CLI 与落盘、进程级代理支持
+
+**已用真实网络验证**
+- Jetstream 实时流：2.7 秒取到 8 条真实数据，脱敏与最小化在真实数据上成立
+  （did / at:// uri / handle 全部剥离，逐条时间降采样到日）
+- Bluesky 历史检索：403 已复现，确认为端点级授权要求
+- Reddit / YouTube：主机可达（doctor 全 200），但**尚未用真实凭据跑通** —— 未验证
 
 **下一步**
-1. 接 Presidio 本地部署，补齐姓名/地名等无固定结构的 PII（当前只有正则层）
-2. `fetchOwned` 模式的 creator API provider —— 中国平台唯一的合规路径
-3. 持久化与调度（APScheduler 或任务计划触发 + Redis 队列，暂不引入独立调度器）
-4. 合规文书与 Art 27 EU 代表（非代码，但商用部署前必须有）
+1. 用真实凭据验证 Reddit 与 YouTube 两条链路
+2. 接 Presidio 本地部署，补齐姓名/地名等无固定结构的 PII（当前只有正则层）
+3. `fetchOwned` 模式的 creator API provider —— 中国平台唯一的合规路径
+4. 调度（APScheduler 或任务计划触发，暂不引入独立调度器）
+5. 合规文书与 Art 27 EU 代表（非代码，但商用部署前必须有）
 
 **平台可行性**：小红书、B站、快手、微信视频号无合规内容 API；
 Meta/Instagram 无商业数据许可通道；TikTok 需先过 Marketing Partner 审核。

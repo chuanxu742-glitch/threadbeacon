@@ -55,6 +55,7 @@ export class YouTubeProvider extends BaseProvider {
     modes: ['searchAll'],
     canFetchComments: true,
     legalBasis: 'YouTube Data API v3，Google 签发的应用级 API key',
+    robots: 'not-applicable', // 走官方 API 端点，非网页爬取
     quota: {
       unit: 'quota-units',
       perDay: 10_000,

@@ -48,7 +48,9 @@ export abstract class BaseProvider implements IDataProvider {
       mode,
       fetchedAt: new Date().toISOString(),
       legalBasis: this.capability.legalBasis,
-      robotsChecked: true,
+      // 取自 capability 而非写死 —— 之前这里硬编码 true，等于在审计记录里
+      // 声明了一件从未发生的事（代码库里根本没有 robots 检查逻辑）
+      robots: this.capability.robots,
       auth: this.http.authMode,
     };
     return { items, provenance };

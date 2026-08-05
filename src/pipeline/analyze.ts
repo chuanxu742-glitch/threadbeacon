@@ -24,6 +24,50 @@ export interface AnalyzeRequest {
   readonly keyword: string;
   readonly limit: number;
   readonly includeComments?: boolean;
+  /**
+   * 取数模式。省略时自动选择：优先 searchAll（能拿历史），
+   * 该平台没有可用的历史检索时退到 streamLive（只能拿订阅期间的增量）。
+   */
+  readonly mode?: 'searchAll' | 'streamLive';
+  /** streamLive 模式的最长订阅时长，默认 60 秒。 */
+  readonly maxDurationMs?: number;
+}
+
+const DEFAULT_STREAM_MS = 60_000;
+
+/** 按模式取数。把「选哪条路」与「怎么分析」分开，编排逻辑才不会被模式差异污染。 */
+async function collect(deps: AnalyzeDeps, req: AnalyzeRequest): Promise<TextBundle> {
+  const wanted = req.mode;
+
+  if (wanted !== 'streamLive') {
+    const p = deps.registry.resolve(req.platform, 'searchAll');
+    if (p?.searchAll) {
+      return p.searchAll({
+        keyword: req.keyword,
+        limit: req.limit,
+        ...(req.includeComments !== undefined ? { includeComments: req.includeComments } : {}),
+      });
+    }
+    if (wanted === 'searchAll') {
+      throw new Error(
+        `平台 ${req.platform} 没有注册支持 searchAll 的 provider。` +
+          `多数合规来源只能取授权账号自有内容或订阅实时流。`,
+      );
+    }
+  }
+
+  const s = deps.registry.resolve(req.platform, 'streamLive');
+  if (!s?.streamLive) {
+    throw new Error(
+      `平台 ${req.platform} 既没有可用的 searchAll，也没有 streamLive provider。` +
+        `未注册通常是缺少凭据，见 .env.example。`,
+    );
+  }
+  return s.streamLive({
+    keyword: req.keyword,
+    limit: req.limit,
+    maxDurationMs: req.maxDurationMs ?? DEFAULT_STREAM_MS,
+  });
 }
 
 const SYSTEM_PROMPT = [
@@ -61,20 +105,7 @@ export async function analyze(
   deps: AnalyzeDeps,
   req: AnalyzeRequest,
 ): Promise<AnalysisReport> {
-  const provider = deps.registry.resolve(req.platform, 'searchAll');
-  if (!provider?.searchAll) {
-    throw new Error(
-      `平台 ${req.platform} 没有注册支持 searchAll 的 provider。` +
-        `多数合规来源只能取授权账号自有内容，请确认该平台是否存在全站搜索路径。`,
-    );
-  }
-
-  const bundle: TextBundle = await provider.searchAll({
-    keyword: req.keyword,
-    limit: req.limit,
-    ...(req.includeComments !== undefined ? { includeComments: req.includeComments } : {}),
-  });
-
+  const bundle: TextBundle = await collect(deps, req);
   const texts = textsOf(bundle);
   const clustered = await deps.clustering.cluster(texts);
 

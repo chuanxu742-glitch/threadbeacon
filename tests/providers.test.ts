@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 import {
   PoliteHttpClient,
   PolitePool,
@@ -24,7 +24,7 @@ function stubProvider(
       mode: modes[0] ?? 'searchAll',
       fetchedAt: '2026-08-05T00:00:00.000Z',
       legalBasis: 'test',
-      robotsChecked: true,
+      robots: 'not-applicable',
       auth: 'anonymous',
     },
   };
@@ -36,6 +36,7 @@ function stubProvider(
       modes,
       canFetchComments: false,
       legalBasis: 'test',
+      robots: 'not-applicable',
     },
     ...(modes.includes('searchAll') ? { searchAll: async () => bundle } : {}),
     ...(modes.includes('fetchOwned') ? { fetchOwned: async () => bundle } : {}),

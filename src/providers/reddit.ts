@@ -70,6 +70,7 @@ export class RedditProvider extends BaseProvider {
       legalBasis:
         opts.legalBasis ??
         'Reddit Data API，OAuth client_credentials 应用级授权。免费档仅限非商业用途，商用须另行签约',
+      robots: 'not-applicable', // 走官方 API 端点，非网页爬取
       quota: { unit: 'requests', note: '免费档 100 QPM/client；商用约 $0.24/1k 次' },
     };
   }

@@ -53,16 +53,48 @@ export class RateLimitedError extends Error {
   }
 }
 
+/**
+ * 403：被拒绝，不是被限流。
+ *
+ * 早期版本把 403 和 429 一起塞进重试退避，这是误诊 ——
+ * 403 多数意味着该端点需要授权、或凭据不足，重试同一个请求三次只会白等，
+ * 最后还报成「限流」误导排查方向。二者必须分开。
+ */
+export class ForbiddenError extends Error {
+  constructor(
+    readonly host: string,
+    readonly url: string,
+  ) {
+    super(
+      `${host} 返回 403（拒绝，非限流）：${url}\n` +
+        `常见原因：该端点需要授权而当前为匿名调用；或应用凭据无此权限。\n` +
+        `若确认该数据源需要平台签发的应用级凭据，请在 provider 中改用 ` +
+        `authMode: 'app-credential' 并提供凭据；若它需要的是用户账号凭据，` +
+        `本项目不支持该数据源（见 DISCLAIMER.md §1）。`,
+    );
+    this.name = 'ForbiddenError';
+  }
+}
+
 export interface HttpOptions {
   /** 凭据档位，默认 'anonymous'。 */
   readonly authMode?: AuthMode;
   /** 同一 host 两次请求之间的最小间隔（毫秒）。默认 1000，即 ≤1 QPS/host。 */
   readonly minIntervalMs?: number;
-  /** 遇 429/403 后的最大重试次数。默认 3。 */
+  /** 遇 429 后的最大重试次数。默认 3。403 不重试。 */
   readonly maxRetries?: number;
   /** 退避基数（毫秒）。默认 2000。 */
   readonly backoffBaseMs?: number;
+  /**
+   * 单次请求超时（毫秒）。默认 30000。
+   *
+   * 没有超时会很难受：部分网络环境下目标主机 DNS 能解析但 TCP 不通，
+   * 请求会一直挂着而不是快速失败。
+   */
+  readonly timeoutMs?: number;
 }
+
+// 代理不在这一层处理 —— 它是进程级配置，见 src/net/proxy.ts。
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -112,15 +144,28 @@ export interface HttpPort {
 
 export class PoliteHttpClient implements HttpPort {
   readonly authMode: AuthMode;
+
   private readonly pool: PolitePool;
   private readonly maxRetries: number;
   private readonly backoffBaseMs: number;
+  private readonly timeoutMs: number;
 
   constructor(opts: HttpOptions = {}) {
     this.authMode = opts.authMode ?? 'anonymous';
     this.pool = new PolitePool(opts.minIntervalMs ?? 1000);
     this.maxRetries = opts.maxRetries ?? 3;
     this.backoffBaseMs = opts.backoffBaseMs ?? 2000;
+    this.timeoutMs = opts.timeoutMs ?? 30_000;
+  }
+
+  private send(url: string, init: RequestInit): Promise<Response> {
+    return fetch(url, {
+      ...init,
+      // 明确禁止 cookie 参与，即使运行时默认行为变化也不受影响
+      credentials: 'omit',
+      redirect: 'follow',
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
   }
 
   /**
@@ -143,15 +188,13 @@ export class PoliteHttpClient implements HttpPort {
 
     for (let attempt = 0; ; attempt++) {
       const res = await this.pool.schedule(host, () =>
-        fetch(url, {
-          headers: { ...headers, accept: 'application/json' },
-          // 明确禁止 cookie 参与，即使运行时默认行为变化也不受影响
-          credentials: 'omit',
-          redirect: 'follow',
-        }),
+        this.send(url, { headers: { ...headers, accept: 'application/json' } }),
       );
 
-      if (res.status === 429 || res.status === 403) {
+      // 403 不重试：它是「被拒绝」而非「太快了」，重试同一个请求不会变成 200
+      if (res.status === 403) throw new ForbiddenError(host, url);
+
+      if (res.status === 429 || res.status === 503) {
         if (attempt >= this.maxRetries) throw new RateLimitedError(res.status, host);
         await sleep(this.backoffBaseMs * 2 ** attempt);
         continue;
@@ -173,7 +216,7 @@ export class PoliteHttpClient implements HttpPort {
     const host = new URL(url).host;
 
     const res = await this.pool.schedule(host, () =>
-      fetch(url, {
+      this.send(url, {
         method: 'POST',
         headers: {
           ...headers,
@@ -181,12 +224,11 @@ export class PoliteHttpClient implements HttpPort {
           accept: 'application/json',
         },
         body: new URLSearchParams(body).toString(),
-        credentials: 'omit',
-        redirect: 'follow',
       }),
     );
 
-    if (res.status === 429 || res.status === 403) {
+    if (res.status === 403) throw new ForbiddenError(host, url);
+    if (res.status === 429 || res.status === 503) {
       throw new RateLimitedError(res.status, host);
     }
     if (!res.ok) {

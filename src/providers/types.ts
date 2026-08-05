@@ -41,7 +41,28 @@ export type ProviderKind =
  * 而合规来源恰恰做不到 —— user-authorized 只能取授权账号自己的内容。
  * 拆成两个模式就是为了让这个差异在类型层面显式化。
  */
-export type AcquisitionMode = 'searchAll' | 'fetchOwned';
+export type AcquisitionMode =
+  /** 按关键词检索全站历史。多数合规来源做不到这件事。 */
+  | 'searchAll'
+  /** 取终端用户授权账号的自有内容。creator API 的形态。 */
+  | 'fetchOwned'
+  /**
+   * 订阅实时流并在本地过滤。
+   *
+   * 与 searchAll 的实质差别：只能拿到订阅期间的增量，拿不到历史。
+   * Bluesky 的 Jetstream 属于这一类 —— 其历史检索接口需要用户凭据，
+   * 而实时流无需授权（2026-08-05 实测确认）。
+   */
+  | 'streamLive';
+
+/** robots.txt 的遵守状态。见 Provenance.robots 的说明。 */
+export type RobotsStatus =
+  /** 调用文档化的 API 端点，robots.txt 不适用（它规范的是网页爬取）。 */
+  | 'not-applicable'
+  /** 已获取并遵守目标站点的 robots.txt。 */
+  | 'checked'
+  /** 未检查。抓取网页时出现此值即为合规缺陷，不应进生产。 */
+  | 'unchecked';
 
 export interface QuotaSpec {
   /** 配额单位，例如 'requests' | 'quota-units' | 'posts'。 */
@@ -66,6 +87,11 @@ export interface ProviderCapability {
    * 这句话会被原样写进每一条数据的 provenance，是 LIA 与审计的基础材料。
    */
   readonly legalBasis: string;
+  /**
+   * 该 provider 的 robots.txt 遵守状态，由 provider 如实声明。
+   * 会被原样写进每一条数据的 provenance —— 不要声明你没做到的事。
+   */
+  readonly robots: RobotsStatus;
   readonly quota?: QuotaSpec;
 }
 
@@ -80,8 +106,18 @@ export interface Provenance {
   /** 采集时间，ISO 8601。注意这是采集时刻，不是原帖发布时刻。 */
   readonly fetchedAt: string;
   readonly legalBasis: string;
-  /** 是否已检查并遵守 robots.txt / ai.txt。EDPB Guidelines 03/2026 视其为合理预期的指示信号。 */
-  readonly robotsChecked: boolean;
+  /**
+   * robots.txt / ai.txt 的遵守状态。
+   *
+   * 之所以不是 boolean：布尔值只能表达「查了/没查」，而最常见的情况是
+   * **不适用** —— robots.txt 规范的是对网页的爬取，调用平台公开文档化的
+   * API 端点不在其射程内。用布尔值就只能在两个都不准确的选项里挑一个，
+   * 而这个字段会进审计记录，不能含糊。
+   *
+   * EDPB Guidelines 03/2026 把 robots.txt 视为合理预期的指示信号，
+   * 绕过它基本判死正当利益的平衡测试 —— 所以 'unchecked' 不应出现在生产环境。
+   */
+  readonly robots: RobotsStatus;
   /**
    * 取数时使用的凭据档位。
    *
@@ -129,6 +165,15 @@ export interface SearchQuery {
   readonly includeComments?: boolean;
 }
 
+export interface StreamQuery {
+  /** 在流上做本地过滤的关键词，大小写不敏感。 */
+  readonly keyword: string;
+  /** 攒够这么多条就停。 */
+  readonly limit: number;
+  /** 最长订阅时长（毫秒）。到时即停，无论攒了多少。 */
+  readonly maxDurationMs: number;
+}
+
 /** 用户授权的自有账号引用。不是被采集对象的标识符，是授权关系的句柄。 */
 export interface OwnedAccountRef {
   /** 由授权流程签发的不透明令牌句柄，不是平台 user ID。 */
@@ -142,6 +187,8 @@ export interface IDataProvider {
   searchAll?(query: SearchQuery): Promise<TextBundle>;
   /** 仅当 capability.modes 含 'fetchOwned' 时存在。 */
   fetchOwned?(ref: OwnedAccountRef): Promise<TextBundle>;
+  /** 仅当 capability.modes 含 'streamLive' 时存在。 */
+  streamLive?(query: StreamQuery): Promise<TextBundle>;
   checkAvailability(): Promise<boolean>;
 }
 
