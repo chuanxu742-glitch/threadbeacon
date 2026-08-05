@@ -1,0 +1,18 @@
+node_modules/
+dist/
+.next/
+coverage/
+
+# 环境变量：绝不入库
+.env
+.env.*
+!.env.example
+
+# 上游参考仓库，只读，不进版本库。
+# 重建方式见 docs/二开方案.md：
+#   git clone https://github.com/liangdabiao/SeekMoney-ai reference/SeekMoney-ai
+reference/
+
+# 分析产物可能含未脱敏中间数据，一律不入库
+analysis-results/
+*.local

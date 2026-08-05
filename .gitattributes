@@ -1,0 +1,11 @@
+# 仓库内统一用 LF，检出时按平台各自处理。
+* text=auto eol=lf
+
+# 锁文件与许可证保持原样，避免无意义的 diff
+pnpm-lock.yaml -diff linguist-generated
+LICENSE        -diff
+NOTICE         -diff
+
+# 语言统计里排除文档与参考资料，让仓库首页反映实际代码构成
+docs/**      linguist-documentation
+reference/** linguist-vendored
