@@ -10,17 +10,22 @@ License: Apache-2.0 · Node ≥ 22 · TypeScript strict
 > 原帖链接与精确时间戳**，落盘产物属个人数据。开源发布不构成"在你的辖区使用它
 > 是合法的"这一主张，GDPR / 个保法 / 平台 ToS 的义务归**运行它的人**。
 
-## 两条硬约束
+## 凭据边界
 
-这两条编码进了类型系统与运行时，不是文档约定：
-
-1. **不做登录态采集。** `Cookie` 在任何模式下都被拒 —— 那是用户会话标记。
-   `AuthMode` 只有 `anonymous` 与 `app-credential` 两个取值，用户身份在类型层面
-   不可表达。依据：Meta v. Bright Data（登出抓公开数据）胜诉，
-   Meta v. Voyager Labs（登录态 + 假账号）被判永久禁令。
+1. **caiji 自己发出的请求不带用户会话凭据。** `PoliteHttpClient` 在任何
+   `AuthMode` 下都拒发 `Cookie`，命中即抛错，只能改源码绕过。
+   依据：Meta v. Bright Data（登出抓公开数据）胜诉，Meta v. Voyager Labs
+   （登录态 + 假账号）被判永久禁令。
    > `app-credential` 指平台签发给应用的凭据（Reddit OAuth、YouTube API key），
-   > 官方 API 是**最合规**的取数路径，与登录态采集性质完全不同。
-2. **无签名逆向。** 不含 `x-s` / `a_bogus` / `x5sec` 及同类实现。
+   > 官方 API 是最合规的取数路径，与登录态采集性质完全不同。
+2. **无签名逆向。** 本项目不含 `x-s` / `a_bogus` / `x5sec` 及同类实现。
+   直接原因是「丁某案」——破解抖音 X-Gorgon 被认定为"专门用于侵入计算机信息系统
+   的程序"，判缓刑（见 `docs/技术选型调研.md`）。
+3. ⚠️ **例外：小红书 provider 使用登录态。** 它以子进程调用你自行安装的
+   Spider_XHS，用你**自有账号**的登录会话取数。仅在配置了 `SPIDER_XHS_PATH`
+   时启用，默认关闭；provenance 会如实记为 `user-authorized` / `user-session`。
+   风险定性见 [`DISCLAIMER.md`](./DISCLAIMER.md) §1——它落在上述两个判例之间，
+   没有可直接援引的有利先例。
 
 ## 数据保留
 
@@ -54,6 +59,13 @@ src/
     bluesky.ts         AT Protocol 历史检索 ⛔ 实测 403，需用户凭据
     reddit.ts          官方 Data API（OAuth client_credentials）
     youtube.ts         Data API v3，含评论
+    external.ts        只承载 authMode 的占位端口，给不走 HTTP 层的 provider 用
+    xiaohongshu/
+      spider-xhs.ts      经 Spider_XHS 子进程取数（自有账号登录态）
+    tikhub/            第三方聚合供应商，一个 token 三个平台
+      client.ts          Bearer 认证 + 响应外壳兜底
+      base.ts            分页/评论/打包骨架，子类只填端点与字段映射
+      xiaohongshu.ts douyin.ts tiktok.ts
   llm/               LLM 接入层，OpenAI 兼容 / Anthropic Messages 双线路
   clustering/        语义聚类（源自 SeekMoney-ai，MIT，见 NOTICE）
   pipeline/
@@ -74,7 +86,26 @@ pnpm doctor                                # 检查数据源可达性与凭据�
 pnpm cli analyze bluesky "battery life" 50 # 跑一次分析并落盘
 pnpm cli list                              # 列出已有报告
 pnpm cli export <目录>                      # 重新导出已有报告
+pnpm xhs:login                             # 小红书扫码登录（仅用 Spider_XHS 时需要）
 ```
+
+### 启用小红书
+
+Spider_XHS 无 LICENSE 文件，代码不随本项目分发，需自行安装：
+
+```bash
+git clone https://github.com/cv-cat/Spider_XHS
+cd Spider_XHS && pip install -r requirements.txt && npm install
+
+# 回到 caiji，在 .env.local 里写：
+#   SPIDER_XHS_PATH=/abs/path/to/Spider_XHS
+pnpm xhs:login                              # 扫码，cookie 存本地
+pnpm cli analyze xiaohongshu "粉底液" 50
+```
+
+需要 Python 3.10+ 与 Node.js 20+（Spider_XHS 的要求）。
+caiji 通过 `scripts/spider_xhs_bridge.py`（本仓库原创）以子进程调用它，
+双方只交换 JSON，Spider_XHS 的代码不进本仓库。
 
 每次 `analyze` 落一个目录，里面是同一份数据的四种形态：
 
@@ -192,8 +223,9 @@ git clone https://github.com/liangdabiao/SeekMoney-ai reference/SeekMoney-ai
   并补了 `DataCleaner.clean()` 的 `indices` 返回 —— 清洗会过滤与去重，
   没有这个映射就无法把簇成员关联回原始记录
 - LLM 接入层：url/key/model 三项配置，OpenAI 兼容与 Anthropic Messages 双线路
-- 四个 provider：Bluesky Jetstream（实时流，零凭据）、Bluesky 检索（需凭据，当前不可用）、
-  Reddit（官方 API + OAuth）、YouTube（Data API v3，含评论）
+- 七个 provider：Bluesky Jetstream（实时流，零凭据）、Bluesky 检索（需凭据，当前不可用）、
+  Reddit（官方 API + OAuth）、YouTube（Data API v3，含评论），
+  以及经 TikHub 接入的小红书 / 抖音 / TikTok（均含评论）
 - 编排层：按模式自动选路，provider → 聚类 → LLM 归纳 → 洞察与原始数据一并落盘
 - 导出层：JSON 全量 + CSV 分表（帖子 / 评论 / 聚类），带 BOM 与公式注入防护
 - CLI 与落盘、进程级代理支持
@@ -204,16 +236,40 @@ git clone https://github.com/liangdabiao/SeekMoney-ai reference/SeekMoney-ai
 - Reddit / YouTube：主机可达（doctor 全 200），但**尚未用真实凭据跑通** —— 未验证
 
 **下一步**
-1. 用真实凭据验证 Reddit 与 YouTube 两条链路（`pnpm smoke:reddit`）
-2. Reddit 评论抓取 —— 当前 `canFetchComments: false`，只取帖子
-3. Jetstream 的 `author` 只有 DID，没有 handle；要显示名需再调
+1. 拿真实凭据验证四条 TikHub 链路与 Reddit / YouTube（`pnpm smoke:reddit`）
+2. 微博 —— TikHub 不提供，需另找供应商或自建路径
+3. Reddit 评论抓取 —— 当前 `canFetchComments: false`，只取帖子
+4. Jetstream 的 `author` 只有 DID，没有 handle；要显示名需再调
    `app.bsky.actor.getProfile` 补齐
-4. `fetchOwned` 模式的 creator API provider —— 中国平台唯一的合规路径
-5. 调度（APScheduler 或任务计划触发，暂不引入独立调度器）
+5. `fetchOwned` 模式的 creator API provider
+6. 调度（APScheduler 或任务计划触发，暂不引入独立调度器）
 
-**平台可行性**：小红书、B站、快手、微信视频号无合规内容 API；
-Meta/Instagram 无商业数据许可通道；TikTok 需先过 Marketing Partner 审核。
-详见 `docs/行业合规范式.md` §5 与 `DISCLAIMER.md` §5。
+## 平台覆盖
+
+| 平台 | 路径 | 评论 | 状态 |
+|---|---|---|---|
+| Bluesky | AT Protocol Jetstream | 回复 | ✅ 真实网络验证过，零凭据；只有实时增量，无历史 |
+| Reddit | 官方 Data API | ❌ | ⚠️ 未用真实凭据验证。免费档仅限非商业 |
+| YouTube | Data API v3 | ✅ | ⚠️ 未用真实凭据验证。search 约 100 次/天 |
+| **小红书** | **Spider_XHS**（自有账号登录态） | ✅ | ⚠️ 代码完整，未用真实账号跑通 |
+| 小红书 | TikHub | ✅ | ⚠️ 未用真实 key 验证 |
+| 抖音 | TikHub | ✅ | ⚠️ 同上 |
+| TikTok | TikHub | ✅ | ⚠️ 同上 |
+| ~~B站~~ | — | — | ⛔ **刻意排除**，见下 |
+
+**B站为什么被排除**：2026-01-28，B站委托律所向 `SocialSisterYi/bilibili-API-collect`
+（20k star，纯 API 文档、不含爬虫代码）发出律师函，指控其"系统性收集整理 B 站非公开 API
+接口、调用逻辑、参数结构、访问控制与鉴权机制，并通过技术文档和代码示例向不特定公众传播"，
+仓库于 2026-01-30 归档。一个只写文档的项目尚且被点名，采集实现的风险不言自明。
+`Platform` 类型里已无 `bilibili`，要加回来请先确认该风险已消除。
+详见 `docs/技术选型调研.md` §1。
+
+TikHub 那四个平台的字段映射来自上游 SeekMoney-ai 跑通过的解析代码，并有离线测试
+锁住结构，但**没有用真实 key 打过一次真请求** —— 拿到 key 后第一件事是核对
+响应结构是否仍然一致（TikHub 的响应层级在不同端点间就不统一，见 `pickArray` 的兜底）。
+
+仍无合规通道的：微信视频号、快手（全站搜索）、Meta / Instagram 全网公开内容。
+微博 TikHub 未提供，需另找路径。详见 `docs/行业合规范式.md` §5 与 `DISCLAIMER.md` §5。
 
 ## 文档
 

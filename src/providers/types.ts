@@ -7,7 +7,16 @@ import type { AuthMode } from './http.js';
 
 export type { AuthMode };
 
-/** 目标平台。与「供应商」是两个独立维度，不要混进同一个枚举。 */
+/**
+ * 目标平台。与「供应商」是两个独立维度，不要混进同一个枚举。
+ *
+ * ⛔ 不含 bilibili，这是刻意排除而非尚未实现：
+ * 2026-01-28，B站委托律所向 SocialSisterYi/bilibili-API-collect（20k star，
+ * 纯 API 文档、不含任何爬虫代码）发出停止侵害通知函，指控其系统性收集并
+ * 公开传播非公开 API 的技术文档，维护者当即清空仓库。
+ * 一个只写文档的项目尚且被点名，采集实现的风险不言自明。
+ * 要重新加回来，请先确认该风险已消除，不要只因为「技术上做得到」就加。
+ */
 export type Platform =
   | 'bluesky'
   | 'reddit'
@@ -17,7 +26,7 @@ export type Platform =
   | 'instagram'
   | 'douyin'
   | 'xiaohongshu'
-  | 'bilibili'
+  | 'weibo'
   | 'kuaishou';
 
 /**

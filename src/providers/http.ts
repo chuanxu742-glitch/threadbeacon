@@ -11,12 +11,28 @@
 //
 // 因此凭据策略按 AuthMode 分档，而不是一刀切。
 
-/** 取数时使用的凭据档位。刻意不存在 'user-session' —— 类型层面不可表达。 */
+/**
+ * 取数时使用的凭据档位。
+ *
+ * 注意 'user-session' 是**声明**用的，不是放行开关：
+ * PoliteHttpClient 在任何档位下都拒发 Cookie，这条没有改变。
+ * 该档位只出现在 provenance 里，用于如实标记「这批数据来自使用了登录态的
+ * 外部工具」（见 providers/external.ts）—— 审计时必须能把它与官方 API
+ * 采到的数据区分开，含糊记录比不记录更糟。
+ */
 export type AuthMode =
   /** 不带任何凭据。开放协议与公开页面走这档。 */
   | 'anonymous'
   /** 平台签发给应用的凭据（OAuth client credentials、API key）。官方 API 走这档。 */
-  | 'app-credential';
+  | 'app-credential'
+  /**
+   * 终端用户以自有账号登录后产生的会话凭据，由外部工具持有并使用。
+   *
+   * 与 Meta v. Voyager Labs 的区别在于账号归属：那案子是登录态 + **假账号**，
+   * 这里是运行者自己的真实账号。二者不同，但也不等同于「登出抓公开数据」，
+   * 风险介于两者之间，由部署者承担（见 DISCLAIMER.md §1）。
+   */
+  | 'user-session';
 
 /** 任何模式下都不允许出现的请求头。均为用户会话标记。 */
 const SESSION_HEADERS = new Set(['cookie', 'set-cookie', 'x-csrf-token']);

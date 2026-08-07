@@ -13,6 +13,7 @@
     "cli": "tsx src/cli.ts",
     "doctor": "tsx src/cli.ts doctor",
     "smoke:reddit": "tsx scripts/smoke-reddit.ts",
+    "xhs:login": "tsx scripts/xhs-login.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"

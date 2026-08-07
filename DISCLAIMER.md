@@ -1,31 +1,60 @@
 # 免责声明与使用边界 / Disclaimer and Scope
 
-> **English summary:** This project collects **publicly visible** social data only.
-> It cannot perform authenticated scraping and contains no signature-reversing
-> code — these are enforced by the type system and runtime. It **does** retain
-> raw content and identifiers (author, permalink, timestamps) and exports them.
-> Publishing this code is **not** a claim that operating it is lawful in your
-> jurisdiction. Compliance obligations (GDPR Art. 6/14/27, PIPL, platform Terms
-> of Service) attach to **whoever runs it**, not to the code. Read the sections
-> below before deploying.
+> **English summary:** This project collects **publicly visible** social data only
+> and contains no signature-reversing code of its own. It **does** retain raw
+> content and identifiers (author, permalink, timestamps) and exports them, and
+> one optional provider (Xiaohongshu) uses a **logged-in session of the operator's
+> own account** via an external third-party tool. Publishing this code is **not** a
+> claim that operating it is lawful in your jurisdiction. Compliance obligations
+> (GDPR Art. 6/14/27, PIPL, platform Terms of Service) attach to **whoever runs
+> it**, not to the code. Read the sections below before deploying.
 
 ---
 
-## 1. 本项目在代码层面**不能**做什么
+## 1. 凭据边界
 
-以下两条不是使用建议，是编码进类型系统与运行时的约束。绕过它们需要改代码，
-而不是改配置：
+### caiji 自身发出的请求：不带用户会话凭据
 
-| 约束 | 实现位置 | 绕过方式 |
-|---|---|---|
-| **不做登录态采集** | `PoliteHttpClient` 检测到 `Cookie` 头即抛 `SessionCredentialError`；`AuthMode` 只有 `anonymous` 与 `app-credential` 两个取值，用户身份在类型层面不可表达 | 只能改源码 |
-| **无签名逆向** | 代码库中不包含 `x-s`、`a_bogus`、`x5sec` 及同类实现，也不引入执行混淆 JS 的运行时 | 只能改源码 |
+`PoliteHttpClient` 在**任何** `AuthMode` 下都拒发 `Cookie` / `Set-Cookie` /
+`X-CSRF-Token`，命中即抛 `SessionCredentialError`。这一条没有开关，只能改源码。
 
 依据：Meta v. Bright Data（登出抓公开数据）胜诉，Meta v. Voyager Labs
-（登录态 + 假账号）被判永久禁令。二者的分界就是有无用户会话凭据。
+（登录态 + 假账号）被判永久禁令。
 
-> 注意 `app-credential` 指平台签发给应用的凭据（Reddit OAuth、YouTube API key），
+> `app-credential` 指平台签发给应用的凭据（Reddit OAuth、YouTube API key），
 > 官方 API 是**最合规**的取数路径，与登录态采集性质完全不同。
+
+### 但有一个 provider 通过外部工具使用登录态
+
+⚠️ **这是本项目最需要主动了解的一条，不要跳过。**
+
+`SpiderXhsProvider`（小红书）不走 caiji 的 HTTP 层，而是以子进程调用使用者
+自行安装的第三方工具 [Spider_XHS](https://github.com/cv-cat/Spider_XHS)，
+后者用**运行者自有账号扫码登录**后的会话凭据取数。
+
+| | 说明 |
+|---|---|
+| 启用方式 | 仅当配置了 `SPIDER_XHS_PATH` 时才注册；默认不启用 |
+| 凭据归属 | 运行者本人的真实账号，非虚假账号、非他人账号 |
+| provenance | 如实记为 `kind='user-authorized'`、`auth='user-session'`，可与官方 API 数据区分 |
+| 第三方代码 | **不随本项目分发**（Spider_XHS 无 LICENSE 文件，按全版权保留处理） |
+| 上游声明 | Spider_XHS README：「仅供学习交流使用，禁止任何商业化行为」 |
+
+**风险定性**：与 Voyager Labs 案的区别在于账号归属（真实自有 vs 虚假账号），
+但也**不等同于** Bright Data 案的「登出抓公开数据」。它落在两者之间，
+不存在可直接援引的有利先例。启用它的人自行承担该风险。
+
+不想要这条路径，就不要配 `SPIDER_XHS_PATH`——其余 provider 一概不使用登录态。
+
+### 无签名逆向
+
+本项目代码库中不包含 `x-s`、`a_bogus`、`x5sec` 及同类签名算法实现，
+也不引入执行混淆 JS 的运行时。
+
+> 相关刑事风险：最高法入库参考案例「丁某案」((2022)苏0213刑初223号) 认定
+> **破解抖音 X-Gorgon 加密算法的软件属于"专门用于侵入计算机信息系统的程序"**，
+> 判有期徒刑 1 年 6 个月缓刑 2 年。这是本项目不自行实现签名逆向的直接原因。
+> 见 `docs/技术选型调研.md` 开头。
 
 ## 2. 本项目**会**保留什么 —— 以及由此产生的义务
 

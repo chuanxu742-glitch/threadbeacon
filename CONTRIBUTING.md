@@ -15,12 +15,27 @@ tsconfig —— 如果类型报错，通常说明代码里确实存在未检查�
 
 这些是项目的存在前提，PR 触及即会被拒（理由见 `DISCLAIMER.md` 第 1 节）：
 
-1. **任何形式的登录态采集。** 包括但不限于：放宽 `PoliteHttpClient` 的凭据校验、
-   新增绕过该校验的 HTTP 路径、在 provider 中自建 fetch。
-   注意应用级凭据（Reddit OAuth、YouTube API key）不在此列 —— 官方 API 是
-   最合规的取数路径，`AuthMode` 的 `app-credential` 档位就是为它准备的。
-2. **任何签名逆向或反爬对抗代码。** `x-s` / `a_bogus` / `x5sec` 及同类，
+1. **放宽 `PoliteHttpClient` 的凭据校验。** 它在任何 `AuthMode` 下都拒发
+   `Cookie`，这条不设开关。新增绕过该校验的 HTTP 路径、在 provider 里自建
+   fetch 同样不接受。
+   > 需要登录态的数据源走外部工具路径（见 `providers/external.ts` 与
+   > `providers/xiaohongshu/spider-xhs.ts`）：由使用者自行安装第三方工具，
+   > caiji 以子进程调用，并在 provenance 里如实标记 `auth='user-session'`。
+   > 关键是**如实记录**——把登录态采来的数据标成 `anonymous` 才是真正不可接受的。
+   > 应用级凭据（Reddit OAuth、YouTube API key）不在此列，用 `app-credential`。
+2. **在本仓库内实现签名逆向。** `x-s` / `a_bogus` / `x5sec` 及同类，
    以及为执行混淆 JS 而引入的运行时。
+   直接原因是「丁某案」的刑事判例，见 `DISCLAIMER.md` §1。
+
+## 引入第三方采集工具
+
+若某数据源只能靠外部工具取到，走「外部依赖」模式，不要把它的代码复制进来：
+
+- 在 `scripts/` 下写一个桥接脚本（本仓库原创），以 JSON 与之交换数据
+- provider 用 `ExternalToolPort` 声明真实的 `authMode`
+- 该工具由使用者自行安装，用环境变量指向；`.env.example` 里写清 license 与限制
+- **先读它的 LICENSE 原文**：无 LICENSE 文件 = 全版权保留 = 代码不可复制、
+  不可分发，只能这样外部调用
 
 ## 关于原始数据
 

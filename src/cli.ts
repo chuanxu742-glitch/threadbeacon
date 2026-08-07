@@ -15,6 +15,8 @@ import { BlueskyJetstreamProvider } from './providers/bluesky-jetstream.js';
 import { PoliteHttpClient } from './providers/http.js';
 import { RedditProvider } from './providers/reddit.js';
 import { ProviderRegistry } from './providers/registry.js';
+import { registerTikHub } from './providers/tikhub/index.js';
+import { SpiderXhsProvider } from './providers/xiaohongshu/spider-xhs.js';
 import { YouTubeProvider } from './providers/youtube.js';
 import type { Platform } from './providers/types.js';
 
@@ -25,6 +27,8 @@ const PROBES: ReadonlyArray<{ name: string; url: string; needs: string[] }> = [
   { name: 'Bluesky', url: 'https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor=bsky.app', needs: [] },
   { name: 'Reddit', url: 'https://www.reddit.com/robots.txt', needs: ['REDDIT_CLIENT_ID', 'REDDIT_CLIENT_SECRET'] },
   { name: 'YouTube', url: 'https://www.googleapis.com/discovery/v1/apis', needs: ['YOUTUBE_API_KEY'] },
+  // 一个 key 覆盖小红书 / 抖音 / TikTok
+  { name: 'TikHub', url: 'https://api.tikhub.io/health', needs: ['TIKHUB_API_KEY'] },
 ];
 
 function buildRegistry(): ProviderRegistry {
@@ -49,6 +53,27 @@ function buildRegistry(): ProviderRegistry {
         apiKey: env['YOUTUBE_API_KEY'],
       }),
     );
+  }
+  // 小红书走 Spider_XHS（自有账号登录态）。与 TikHub 的小红书 kind 不同，
+  // registry 按 (platform, kind) 索引，两者可并存，resolve 时按合规优先级选
+  if (env['SPIDER_XHS_PATH']) {
+    reg.register(
+      new SpiderXhsProvider({
+        spiderPath: env['SPIDER_XHS_PATH'],
+        cookieFile: env['SPIDER_XHS_COOKIE'] ?? '.spider-xhs-cookie.json',
+        ...(env['PYTHON_BIN'] ? { pythonBin: env['PYTHON_BIN'] } : {}),
+      }),
+    );
+  }
+  // 一个 token 打通小红书 / 抖音 / TikTok
+  if (env['TIKHUB_API_KEY']) {
+    registerTikHub(reg, {
+      apiToken: env['TIKHUB_API_KEY'],
+      useChinaDomain: env['TIKHUB_USE_CN_DOMAIN'] === '1',
+      ...(env['TIKHUB_MAX_COMMENTS']
+        ? { maxCommentsPerPost: Number(env['TIKHUB_MAX_COMMENTS']) }
+        : {}),
+    });
   }
   return reg;
 }

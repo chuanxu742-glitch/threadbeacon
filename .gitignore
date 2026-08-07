@@ -15,4 +15,8 @@ reference/
 
 # 分析产物含原文、作者与原帖链接，属个人数据，一律不入库
 analysis-results/
+
+# 小红书登录 cookie，是账号凭据
+.spider-xhs-cookie.json
+*.cookie.json
 *.local
