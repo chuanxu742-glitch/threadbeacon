@@ -81,7 +81,7 @@ describe('BlueskyJetstreamProvider', () => {
     expect(socket.closed).toBe(true);
   });
 
-  it('丢弃标识符，只留文本与日期桶', async () => {
+  it('从事件里还原 did、rkey 与网页链接', async () => {
     const { p } = withSocket((s) => {
       s.push({
         kind: 'commit',
@@ -90,15 +90,47 @@ describe('BlueskyJetstreamProvider', () => {
           operation: 'create',
           collection: 'app.bsky.feed.post',
           rkey: 'xyz',
+          cid: 'bafyfake',
           record: { text: 'battery drains fast', createdAt: '2026-08-05T13:47:22Z', langs: ['en'] },
         },
       });
     });
 
     const bundle = await p.streamLive({ keyword: 'battery', limit: 1, maxDurationMs: 2000 });
-    expect(bundle.items[0]!.timeBucket).toBe('2026-08-05');
-    expect(bundle.items[0]!.lang).toBe('en');
-    expect(JSON.stringify(bundle)).not.toContain('did:plc:abc123');
+    const item = bundle.items[0]!;
+
+    expect(item.postedAt).toBe('2026-08-05T13:47:22.000Z');
+    expect(item.timeBucket).toBe('2026-08-05');
+    expect(item.lang).toBe('en');
+    expect(item.id).toBe('xyz');
+    expect(item.authorId).toBe('did:plc:abc123');
+    expect(item.url).toBe('https://bsky.app/profile/did:plc:abc123/post/xyz');
+    expect(item.itemType).toBe('post');
+    expect(item.raw?.['atUri']).toBe('at://did:plc:abc123/app.bsky.feed.post/xyz');
+  });
+
+  it('回复被标为 comment，并带上被回复帖子的 uri', async () => {
+    const parentUri = 'at://did:plc:other/app.bsky.feed.post/parent1';
+    const { p } = withSocket((s) => {
+      s.push({
+        kind: 'commit',
+        did: 'did:plc:abc123',
+        commit: {
+          operation: 'create',
+          collection: 'app.bsky.feed.post',
+          rkey: 'reply1',
+          record: {
+            text: 'battery agreed',
+            createdAt: '2026-08-05T13:47:22Z',
+            reply: { root: { uri: parentUri }, parent: { uri: parentUri } },
+          },
+        },
+      });
+    });
+
+    const bundle = await p.streamLive({ keyword: 'battery', limit: 1, maxDurationMs: 2000 });
+    expect(bundle.items[0]!.itemType).toBe('comment');
+    expect(bundle.items[0]!.parentId).toBe(parentUri);
   });
 
   it('忽略非 create 操作与其他集合', async () => {

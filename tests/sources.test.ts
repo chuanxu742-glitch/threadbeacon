@@ -30,14 +30,18 @@ function fakeHttp(
 }
 
 const bskyPost = (text: string, createdAt: string, lang?: string) => ({
-  // 这些标识符字段刻意保留在假响应里，用来验证它们不会流进产物
   uri: 'at://did:plc:abc123/app.bsky.feed.post/xyz',
-  author: { did: 'did:plc:abc123', handle: 'someone.bsky.social' },
+  cid: 'bafyfake',
+  author: { did: 'did:plc:abc123', handle: 'someone.bsky.social', displayName: '某人' },
   record: { text, createdAt, ...(lang ? { langs: [lang] } : {}) },
+  likeCount: 7,
+  replyCount: 2,
+  repostCount: 1,
+  quoteCount: 1,
 });
 
 describe('BlueskyProvider', () => {
-  it('抽取正文与时间，并丢弃全部标识符', async () => {
+  it('抽取正文、时间与全部标识符', async () => {
     const { port } = fakeHttp([
       { match: 'searchPosts', reply: { posts: [bskyPost('续航太差', '2026-08-05T13:47:22Z', 'zh')] } },
     ]);
@@ -48,13 +52,17 @@ describe('BlueskyProvider', () => {
     expect(bundle.items).toHaveLength(1);
     const item = bundle.items[0]!;
     expect(item.text).toBe('续航太差');
+    expect(item.postedAt).toBe('2026-08-05T13:47:22.000Z');
     expect(item.timeBucket).toBe('2026-08-05');
     expect(item.lang).toBe('zh');
-    // 假响应里的 handle / did / uri 一个都不能出现
-    const dump = JSON.stringify(bundle);
-    expect(dump).not.toContain('someone.bsky.social');
-    expect(dump).not.toContain('did:plc:abc123');
-    expect(dump).not.toContain('at://');
+    expect(item.author).toBe('someone.bsky.social');
+    expect(item.authorId).toBe('did:plc:abc123');
+    expect(item.id).toBe('xyz');
+    expect(item.url).toBe('https://bsky.app/profile/did:plc:abc123/post/xyz');
+    expect(item.itemType).toBe('post');
+    // 转推与引用合并进 shares
+    expect(item.metrics).toEqual({ likes: 7, comments: 2, shares: 2 });
+    expect(item.raw?.['atUri']).toBe('at://did:plc:abc123/app.bsky.feed.post/xyz');
   });
 
   it('provenance 如实记录 open-protocol / anonymous', async () => {
@@ -119,7 +127,22 @@ describe('RedditProvider', () => {
           match: '/search',
           reply: {
             data: {
-              children: [{ data: { title: '标题', selftext: '正文', created_utc: 1785000000 } }],
+              children: [
+                {
+                  data: {
+                    id: 'abc123',
+                    title: '标题',
+                    selftext: '正文',
+                    created_utc: 1785000000,
+                    author: 'some_redditor',
+                    author_fullname: 't2_xyz',
+                    permalink: '/r/gadgets/comments/abc123/title/',
+                    subreddit: 'gadgets',
+                    score: 42,
+                    num_comments: 8,
+                  },
+                },
+              ],
             },
           },
         },
@@ -132,9 +155,19 @@ describe('RedditProvider', () => {
 
     expect(calls[0]).toContain('access_token');
     expect(calls[1]).toContain('/search');
-    expect(bundle.items[0]!.text).toBe('标题\n\n正文');
     expect(bundle.provenance.auth).toBe('app-credential');
     expect(bundle.provenance.kind).toBe('official-api');
+
+    const item = bundle.items[0]!;
+    expect(item.text).toBe('标题\n\n正文');
+    expect(item.title).toBe('标题');
+    expect(item.id).toBe('abc123');
+    expect(item.author).toBe('some_redditor');
+    expect(item.authorId).toBe('t2_xyz');
+    expect(item.url).toBe('https://www.reddit.com/r/gadgets/comments/abc123/title/');
+    expect(item.metrics?.likes).toBe(42);
+    expect(item.metrics?.comments).toBe(8);
+    expect(item.raw?.['subreddit']).toBe('gadgets');
   });
 
   it('复用未过期的 token，不重复换取', async () => {
@@ -177,7 +210,13 @@ describe('YouTubeProvider', () => {
             items: [
               {
                 id: { videoId: 'v1' },
-                snippet: { title: '标题', description: '描述', publishedAt: '2026-08-05T00:00:00Z' },
+                snippet: {
+                  title: '标题',
+                  description: '描述',
+                  publishedAt: '2026-08-05T00:00:00Z',
+                  channelId: 'UC123',
+                  channelTitle: '某频道',
+                },
               },
             ],
           },
@@ -193,7 +232,14 @@ describe('YouTubeProvider', () => {
     expect(calls[0]).toContain('key=KEY123');
     // limit 超过单页上限时收敛到 50，而不是翻页烧配额
     expect(calls[0]).toContain('maxResults=50');
-    expect(bundle.items[0]!.text).toBe('标题\n\n描述');
+
+    const item = bundle.items[0]!;
+    expect(item.text).toBe('标题\n\n描述');
+    expect(item.id).toBe('v1');
+    expect(item.url).toBe('https://www.youtube.com/watch?v=v1');
+    expect(item.author).toBe('某频道');
+    expect(item.authorId).toBe('UC123');
+    expect(item.itemType).toBe('post');
   });
 
   it('includeComments 时追加评论', async () => {
@@ -213,8 +259,16 @@ describe('YouTubeProvider', () => {
             items: [
               {
                 snippet: {
+                  totalReplyCount: 3,
                   topLevelComment: {
-                    snippet: { textOriginal: '评论内容', publishedAt: '2026-08-06T00:00:00Z' },
+                    id: 'cmt1',
+                    snippet: {
+                      textOriginal: '评论内容',
+                      publishedAt: '2026-08-06T00:00:00Z',
+                      authorDisplayName: '@viewer',
+                      authorChannelId: { value: 'UCviewer' },
+                      likeCount: 5,
+                    },
                   },
                 },
               },
@@ -228,6 +282,15 @@ describe('YouTubeProvider', () => {
 
     const bundle = await p.searchAll({ keyword: 'x', limit: 5, includeComments: true });
     expect(bundle.items.map((i) => i.text)).toEqual(['T', '评论内容']);
+
+    const comment = bundle.items[1]!;
+    expect(comment.itemType).toBe('comment');
+    // 评论靠 parentId 关联回视频
+    expect(comment.parentId).toBe('v1');
+    expect(comment.id).toBe('cmt1');
+    expect(comment.author).toBe('@viewer');
+    expect(comment.authorId).toBe('UCviewer');
+    expect(comment.metrics).toEqual({ likes: 5, comments: 3 });
   });
 
   it('关闭评论的视频返回错误时跳过而不中断', async () => {

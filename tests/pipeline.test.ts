@@ -1,10 +1,10 @@
-﻿import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { ClusteringService } from '../src/clustering/ClusteringService.js';
 import { analyze } from '../src/pipeline/analyze.js';
-import { containsVerbatim, gradeQuality } from '../src/pipeline/report.js';
+import { gradeQuality } from '../src/pipeline/report.js';
 import { ProviderRegistry } from '../src/providers/registry.js';
 import type { ChatRequest, ILlmClient, LlmResult } from '../src/llm/types.js';
-import type { IDataProvider, TextBundle } from '../src/providers/types.js';
+import type { IDataProvider, SourceItem, TextBundle } from '../src/providers/types.js';
 import { FakeEmbeddingProvider } from './helpers/fakeEmbedding.js';
 
 const PROBES = ['续航', '价格'] as const;
@@ -18,9 +18,24 @@ const TEXTS = [
   '价格能降下来的话我会考虑入手，现在这个定价没有竞争力',
 ];
 
+function item(text: string, i: number): SourceItem {
+  return {
+    text,
+    postedAt: `2026-08-05T0${i}:00:00.000Z`,
+    timeBucket: '2026-08-05',
+    platform: 'bluesky',
+    itemType: 'post',
+    id: `post-${i}`,
+    author: `user${i}.bsky.social`,
+    authorId: `did:plc:fake${i}`,
+    url: `https://bsky.app/profile/did:plc:fake${i}/post/post-${i}`,
+    metrics: { likes: i, comments: 0, shares: 0 },
+  };
+}
+
 function fakeProvider(texts: readonly string[]): IDataProvider {
   const bundle: TextBundle = {
-    items: texts.map((text) => ({ text, timeBucket: '2026-08-05', platform: 'bluesky' as const })),
+    items: texts.map(item),
     provenance: {
       providerId: 'fake',
       platform: 'bluesky',
@@ -74,17 +89,14 @@ const goodJson = (theme: string) =>
 
 function deps(llm: ILlmClient, texts: readonly string[] = TEXTS) {
   const registry = new ProviderRegistry().register(fakeProvider(texts));
-  const clustering = new ClusteringService(new FakeEmbeddingProvider(PROBES), {
-    minSamples: 3,
-    unsafeAllowSmallClusters: true,
-  });
+  const clustering = new ClusteringService(new FakeEmbeddingProvider(PROBES), { minSamples: 3 });
   return { registry, clustering, llm };
 }
 
 const req = { platform: 'bluesky' as const, keyword: 'x', limit: 50 };
 
 describe('analyze 端到端', () => {
-  it('跑通 provider → 聚类 → LLM → 聚类级产物', async () => {
+  it('跑通 provider → 聚类 → LLM → 产物', async () => {
     const llm = fakeLlm((r) => goodJson(r.messages[0]!.content.includes('续航') ? '续航' : '价格'));
     const report = await analyze(deps(llm), req);
 
@@ -93,38 +105,57 @@ describe('analyze 端到端', () => {
     expect(report.stats.noiseCount).toBe(0);
     expect(report.painPoints.map((p) => p.theme).sort()).toEqual(['价格', '续航']);
     expect(report.provenance.auth).toBe('anonymous');
+    expect(report.keyword).toBe('x');
   });
 
-  it('产物中不含任何原文 —— 这是整个架构的目的', async () => {
+  it('产物保留全量原始记录与标识符', async () => {
     const llm = fakeLlm((r) => goodJson(r.messages[0]!.content.includes('续航') ? '续航' : '价格'));
     const report = await analyze(deps(llm), req);
 
+    expect(report.items).toHaveLength(TEXTS.length);
     const dump = JSON.stringify(report);
     for (const t of TEXTS) {
-      expect(dump).not.toContain(t);
+      expect(dump).toContain(t);
     }
-    // 也不该出现单条级别的字段
-    expect(dump).not.toContain('timeBucket');
+    expect(report.items[0]!.author).toBe('user0.bsky.social');
+    expect(report.items[0]!.url).toContain('bsky.app');
+    expect(report.items[0]!.postedAt).toBe('2026-08-05T00:00:00.000Z');
   });
 
-  it('LLM 逐字回显原文时替换该表述并计数', async () => {
-    // 让 LLM 把第一条原文原样塞进 summary
-    const llm = fakeLlm((r) => {
-      const first = r.messages[0]!.content.split('\n---\n')[0]!;
-      return JSON.stringify({ theme: '主题', summary: first, keywords: [], severity: 3 });
-    });
+  it('memberIndices 指回 items 的正确下标', async () => {
+    const llm = fakeLlm((r) => goodJson(r.messages[0]!.content.includes('续航') ? '续航' : '价格'));
     const report = await analyze(deps(llm), req);
 
-    expect(report.stats.redactedSummaries).toBe(2);
-    const dump = JSON.stringify(report);
-    for (const t of TEXTS) expect(dump).not.toContain(t);
-    expect(report.painPoints[0]!.summary).toMatch(/略去细节/);
+    for (const p of report.painPoints) {
+      expect(p.memberIndices).toHaveLength(p.size);
+      // 每个下标指向的 item，其文本必须确实属于这个簇
+      for (const idx of p.memberIndices) {
+        expect(report.items[idx]).toBeDefined();
+        expect(p.texts).toContain(report.items[idx]!.text);
+      }
+    }
+  });
+
+  it('清洗过滤掉部分文本后 memberIndices 仍对得上', async () => {
+    // 前面插入会被清洗掉的噪音（纯符号、过短），下标会整体错位
+    const noisy = ['!!!', '哈哈', ...TEXTS];
+    const llm = fakeLlm((r) => goodJson(r.messages[0]!.content.includes('续航') ? '续航' : '价格'));
+    const report = await analyze(deps(llm, noisy), req);
+
+    expect(report.items).toHaveLength(noisy.length);
+    for (const p of report.painPoints) {
+      for (const idx of p.memberIndices) {
+        expect(p.texts).toContain(report.items[idx]!.text);
+      }
+    }
   });
 
   it('LLM 拒答时跳过该簇而不中断整轮', async () => {
     const report = await analyze(deps(fakeLlm(() => '', true)), req);
     expect(report.painPoints).toHaveLength(0);
     expect(report.stats.clusterCount).toBe(2);
+    // 洞察没出来，但原始数据仍然完整落下
+    expect(report.items).toHaveLength(TEXTS.length);
   });
 
   it('LLM 输出不可解析时跳过该簇', async () => {
@@ -138,9 +169,9 @@ describe('analyze 端到端', () => {
     expect(report.painPoints.length).toBeGreaterThan(0);
   });
 
-  it('severity 超范围时收敛到 0–5', async () => {
+  it('severity 超范围时收敛到 0-5', async () => {
     const llm = fakeLlm(() =>
-      JSON.stringify({ theme: 'T', summary: '概括表述，与原文无关。', keywords: [], severity: 99 }),
+      JSON.stringify({ theme: 'T', summary: '概括表述。', keywords: [], severity: 99 }),
     );
     const report = await analyze(deps(llm), req);
     expect(report.painPoints.every((p) => p.severity >= 0 && p.severity <= 5)).toBe(true);
@@ -162,7 +193,7 @@ describe('analyze 端到端', () => {
 
   it('没有 searchAll 但有 streamLive 时自动回退', async () => {
     const streamed: TextBundle = {
-      items: [{ text: '续航很差需要频繁充电', timeBucket: '2026-08-05', platform: 'bluesky' }],
+      items: [item('续航很差需要频繁充电', 0)],
       provenance: {
         providerId: 'stream',
         platform: 'bluesky',
@@ -187,15 +218,9 @@ describe('analyze 端到端', () => {
       streamLive: async () => streamed,
       checkAvailability: async () => true,
     });
-    const clustering = new ClusteringService(new FakeEmbeddingProvider(PROBES), {
-      minSamples: 3,
-      unsafeAllowSmallClusters: true,
-    });
+    const clustering = new ClusteringService(new FakeEmbeddingProvider(PROBES), { minSamples: 3 });
 
-    const report = await analyze(
-      { registry, clustering, llm: fakeLlm(() => goodJson('续航')) },
-      req,
-    );
+    const report = await analyze({ registry, clustering, llm: fakeLlm(() => goodJson('续航')) }, req);
     expect(report.provenance.mode).toBe('streamLive');
   });
 
@@ -203,29 +228,6 @@ describe('analyze 端到端', () => {
     const llm = fakeLlm((r) => goodJson(r.messages[0]!.content.includes('续航') ? '续航' : '价格'));
     const report = await analyze(deps(llm), req);
     expect(report.dataQuality).toBe('exploratory');
-  });
-});
-
-describe('containsVerbatim', () => {
-  it('识别整条回显', () => {
-    expect(containsVerbatim('前缀 续航太差 后缀', ['续航太差'])).toBe(true);
-  });
-
-  it('识别长文本中的片段摘录', () => {
-    const input = '这个手机续航太差了，一天要充两次电，出门必须带充电宝才敢用';
-    expect(containsVerbatim(`用户提到「${input.slice(6, 40)}」这一点`, [input])).toBe(true);
-  });
-
-  it('对真正的改写不误报', () => {
-    expect(
-      containsVerbatim('用户群体普遍反映电池表现不足，需要频繁补电。', [
-        '这个手机续航太差了，一天要充两次电，出门必须带充电宝才敢用',
-      ]),
-    ).toBe(false);
-  });
-
-  it('忽略空白差异', () => {
-    expect(containsVerbatim('a  b', ['a b'])).toBe(true);
   });
 });
 

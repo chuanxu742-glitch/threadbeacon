@@ -10,8 +10,7 @@
 // 见 docs/技术选型调研.md §10。
 
 import { BaseProvider, type BaseProviderDeps } from './base.js';
-import type { RawObservation } from '../privacy/minimize.js';
-import type { ProviderCapability, SearchQuery, TextBundle } from './types.js';
+import type { ProviderCapability, RawObservation, SearchQuery, TextBundle } from './types.js';
 
 const API_BASE = 'https://www.googleapis.com/youtube/v3';
 const SEARCH_PAGE_SIZE = 50; // search.list maxResults 上限
@@ -24,17 +23,30 @@ interface SearchResponse {
       readonly title?: string;
       readonly description?: string;
       readonly publishedAt?: string;
+      readonly channelId?: string;
+      readonly channelTitle?: string;
+      readonly thumbnails?: unknown;
+      readonly liveBroadcastContent?: string;
     };
   }>;
 }
 
 interface CommentThreadsResponse {
   readonly items?: ReadonlyArray<{
+    readonly id?: string;
     readonly snippet?: {
+      readonly totalReplyCount?: number;
       readonly topLevelComment?: {
+        readonly id?: string;
         readonly snippet?: {
           readonly textOriginal?: string;
           readonly publishedAt?: string;
+          readonly updatedAt?: string;
+          readonly authorDisplayName?: string;
+          readonly authorChannelId?: { readonly value?: string };
+          readonly authorChannelUrl?: string;
+          readonly authorProfileImageUrl?: string;
+          readonly likeCount?: number;
         };
       };
     };
@@ -96,13 +108,28 @@ export class YouTubeProvider extends BaseProvider {
     for (const item of search.items ?? []) {
       const publishedAt = item.snippet?.publishedAt;
       if (!publishedAt) continue;
-      const text = [item.snippet?.title, item.snippet?.description]
-        .filter((s): s is string => !!s?.trim())
+      const s = item.snippet;
+      const vid = item.id?.videoId;
+      const text = [s?.title, s?.description]
+        .filter((t): t is string => !!t?.trim())
         .join('\n\n');
       if (text) {
-        raws.push({ text, observedAt: publishedAt, platform: 'youtube' });
+        raws.push({
+          text,
+          observedAt: publishedAt,
+          platform: 'youtube',
+          itemType: 'post',
+          ...(vid ? { id: vid, url: `https://www.youtube.com/watch?v=${vid}` } : {}),
+          ...(s?.channelTitle ? { author: s.channelTitle } : {}),
+          ...(s?.channelId ? { authorId: s.channelId } : {}),
+          ...(s?.title ? { title: s.title } : {}),
+          raw: {
+            description: s?.description,
+            thumbnails: s?.thumbnails,
+            liveBroadcastContent: s?.liveBroadcastContent,
+          },
+        });
       }
-      const vid = item.id?.videoId;
       if (vid) videoIds.push(vid);
     }
 
@@ -133,9 +160,32 @@ export class YouTubeProvider extends BaseProvider {
 
     const out: RawObservation[] = [];
     for (const item of res.items ?? []) {
-      const s = item.snippet?.topLevelComment?.snippet;
+      const top = item.snippet?.topLevelComment;
+      const s = top?.snippet;
       if (!s?.textOriginal || !s.publishedAt) continue;
-      out.push({ text: s.textOriginal, observedAt: s.publishedAt, platform: 'youtube' });
+      out.push({
+        text: s.textOriginal,
+        observedAt: s.publishedAt,
+        platform: 'youtube',
+        itemType: 'comment',
+        // 评论挂在视频下，parentId 指回视频，导出时两张表靠它关联
+        parentId: videoId,
+        ...(top?.id ? { id: top.id } : {}),
+        ...(s.authorDisplayName ? { author: s.authorDisplayName } : {}),
+        ...(s.authorChannelId?.value ? { authorId: s.authorChannelId.value } : {}),
+        ...(top?.id
+          ? { url: `https://www.youtube.com/watch?v=${videoId}&lc=${top.id}` }
+          : {}),
+        metrics: {
+          likes: s.likeCount ?? 0,
+          comments: item.snippet?.totalReplyCount ?? 0,
+        },
+        raw: {
+          updatedAt: s.updatedAt,
+          authorChannelUrl: s.authorChannelUrl,
+          authorProfileImageUrl: s.authorProfileImageUrl,
+        },
+      });
     }
     return out;
   }

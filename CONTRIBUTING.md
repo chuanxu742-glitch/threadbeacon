@@ -11,17 +11,26 @@ pnpm test        # 必须全绿
 TypeScript 开了 `strict` 与 `noUncheckedIndexedAccess`。不要为了让编译通过而放宽
 tsconfig —— 如果类型报错，通常说明代码里确实存在未检查的下标访问或空值路径。
 
-## 三条不接受的改动
+## 两条不接受的改动
 
-这些是项目的存在前提，PR 触及即会被拒（理由见 `DISCLAIMER.md`）：
+这些是项目的存在前提，PR 触及即会被拒（理由见 `DISCLAIMER.md` 第 1 节）：
 
 1. **任何形式的登录态采集。** 包括但不限于：放宽 `PoliteHttpClient` 的凭据校验、
    新增绕过该校验的 HTTP 路径、在 provider 中自建 fetch。
+   注意应用级凭据（Reddit OAuth、YouTube API key）不在此列 —— 官方 API 是
+   最合规的取数路径，`AuthMode` 的 `app-credential` 档位就是为它准备的。
 2. **任何签名逆向或反爬对抗代码。** `x-s` / `a_bogus` / `x5sec` 及同类，
    以及为执行混淆 JS 而引入的运行时。
-3. **降低隐私默认值。** 包括：给 `SourceItem` 加标识符字段、
-   把 `K_ANONYMITY_FLOOR` 调低、让 `buildSourceItem()` 之外的路径能构造 SourceItem、
-   把原文评论写进持久层。
+
+## 关于原始数据
+
+本项目保留并导出原文、作者、链接与精确时间戳（见 `DISCLAIMER.md` 第 2 节）。
+新增 provider 时，**尽量把平台返回的字段提取完整** —— 归一到 `SourceItem`
+的具名字段，平台特有的放进 `raw`。丢字段比多留字段更难事后补救：
+重新采集要重新烧配额，而原帖可能已经删了。
+
+对应地，落盘产物是个人数据。不要把 `analysis-results/` 提交进版本库，
+不要在 issue 或 PR 里粘贴含真实作者名与链接的样本。
 
 ## 新增 provider
 
@@ -47,4 +56,4 @@ tsconfig —— 如果类型报错，通常说明代码里确实存在未检查�
 ## 提交信息
 
 说明改了什么以及为什么。涉及合规约束的改动，请在描述中说明它如何与
-`DISCLAIMER.md` 第 1 节的三条约束相容。
+`DISCLAIMER.md` 第 1 节的两条约束相容。

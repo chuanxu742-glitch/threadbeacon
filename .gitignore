@@ -13,6 +13,6 @@ coverage/
 #   git clone https://github.com/liangdabiao/SeekMoney-ai reference/SeekMoney-ai
 reference/
 
-# 分析产物可能含未脱敏中间数据，一律不入库
+# 分析产物含原文、作者与原帖链接，属个人数据，一律不入库
 analysis-results/
 *.local

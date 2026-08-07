@@ -6,10 +6,11 @@
 //   pnpm cli list                        列出已有报告
 
 import { ClusteringService } from './clustering/ClusteringService.js';
+import { loadEnvFiles } from './env.js';
 import { configureProxyFromEnv } from './net/proxy.js';
 import { createLlmClient, llmConfigFromEnv } from './llm/index.js';
 import { analyze } from './pipeline/analyze.js';
-import { DEFAULT_STORE_DIR, listReports, saveReport } from './pipeline/store.js';
+import { DEFAULT_STORE_DIR, listReports, loadReport, saveReport } from './pipeline/store.js';
 import { BlueskyJetstreamProvider } from './providers/bluesky-jetstream.js';
 import { PoliteHttpClient } from './providers/http.js';
 import { RedditProvider } from './providers/reddit.js';
@@ -52,7 +53,10 @@ function buildRegistry(): ProviderRegistry {
   return reg;
 }
 
-async function doctor(): Promise<number> {
+async function doctor(envFiles: readonly string[]): Promise<number> {
+  console.log(
+    `配置来源：${envFiles.length ? envFiles.join(' + ') : '仅系统环境变量（未找到 .env.local / .env）'}`,
+  );
   const proxy = env['HTTPS_PROXY'] ?? env['HTTP_PROXY'];
   console.log(`代理：${proxy ?? '未配置（如所在网络不可达，请设置 HTTPS_PROXY）'}\n`);
 
@@ -114,30 +118,51 @@ async function runAnalyze(platform: string, keyword: string, limitArg?: string):
   const llm = createLlmClient(llmConfigFromEnv(env));
   const report = await analyze(
     { registry, clustering: new ClusteringService(), llm },
-    { platform: platform as Platform, keyword, limit },
+    { platform: platform as Platform, keyword, limit, includeComments: true },
   );
 
-  const file = await saveReport(report, { label: keyword });
-  console.log(`共 ${report.stats.totalTexts} 条，聚出 ${report.stats.clusterCount} 个簇，` +
-    `噪声 ${report.stats.noiseCount} 条，数据可靠性：${report.dataQuality}`);
-  if (report.stats.redactedSummaries > 0) {
-    console.log(`⚠️ ${report.stats.redactedSummaries} 条表述因疑似逐字引用原文被替换，建议收紧提示词`);
-  }
+  const saved = await saveReport(report, { label: keyword });
+  const posts = report.items.filter((i) => i.itemType === 'post').length;
+  const comments = report.items.length - posts;
+
+  console.log(
+    `共 ${report.stats.totalTexts} 条（帖子 ${posts} / 评论 ${comments}），` +
+      `聚出 ${report.stats.clusterCount} 个簇，噪声 ${report.stats.noiseCount} 条，` +
+      `数据可靠性：${report.dataQuality}`,
+  );
   for (const p of report.painPoints) {
     console.log(`\n[${p.severity}/5] ${p.theme}（${p.size} 条）\n  ${p.summary}`);
   }
-  console.log(`\n已写入 ${file}`);
+  console.log(`\n已写入 ${saved.dir}`);
+  for (const f of saved.files) console.log(`  ${f}`);
+  return 0;
+}
+
+/** 把已有报告重新导出一遍。改了导出格式后不必重新采集。 */
+async function runExport(target: string): Promise<number> {
+  let report;
+  try {
+    report = await loadReport(target);
+  } catch (e) {
+    console.error(`读不到报告 "${target}"：${e instanceof Error ? e.message : e}`);
+    return 2;
+  }
+  const saved = await saveReport(report, { label: report.keyword });
+  console.log(`已导出到 ${saved.dir}`);
+  for (const f of saved.files) console.log(`  ${f}`);
   return 0;
 }
 
 async function main(): Promise<number> {
+  // env 文件要最先读：代理地址与各数据源凭据都可能写在 .env.local 里
+  const envFiles = loadEnvFiles();
   // 代理必须在任何出站请求之前配置，且要覆盖 LLM SDK 的 fetch
   await configureProxyFromEnv(env);
   const [cmd, ...rest] = process.argv.slice(2);
 
   switch (cmd) {
     case 'doctor':
-      return doctor();
+      return doctor(envFiles);
     case 'analyze': {
       const [platform, keyword, limit] = rest;
       if (!platform || !keyword) {
@@ -147,9 +172,17 @@ async function main(): Promise<number> {
       return runAnalyze(platform, keyword, limit);
     }
     case 'list': {
-      const files = await listReports();
-      console.log(files.length ? files.join('\n') : `${DEFAULT_STORE_DIR} 下暂无报告`);
+      const dirs = await listReports();
+      console.log(dirs.length ? dirs.join('\n') : `${DEFAULT_STORE_DIR} 下暂无报告`);
       return 0;
+    }
+    case 'export': {
+      const [target] = rest;
+      if (!target) {
+        console.error('用法：pnpm cli export <报告目录或 report.json 路径>');
+        return 2;
+      }
+      return runExport(target);
     }
     default:
       console.log(
@@ -157,9 +190,11 @@ async function main(): Promise<number> {
           'caiji —— 多平台社媒公开数据采集与聚合分析',
           '',
           '  pnpm doctor                          检查数据源可达性与凭据配置',
-          '  pnpm cli analyze <platform> <关键词> [limit]   跑一次分析并落盘',
+          '  pnpm cli analyze <platform> <关键词> [limit]   采集、分析并落盘',
           '  pnpm cli list                        列出已有报告',
+          '  pnpm cli export <目录>                重新导出已有报告的 CSV/JSON',
           '',
+          '每次分析落一个目录，含 report.json 与 posts/comments/clusters 三张 CSV。',
           '凭据配置见 .env.example；部署前请先读 DISCLAIMER.md。',
         ].join('\n'),
       );

@@ -16,7 +16,15 @@ function stubProvider(
   modes: Array<'searchAll' | 'fetchOwned'>,
 ): IDataProvider {
   const bundle: TextBundle = {
-    items: [{ text: 'hello', timeBucket: '2026-08-05', platform }],
+    items: [
+      {
+        text: 'hello',
+        postedAt: '2026-08-05T00:00:00.000Z',
+        timeBucket: '2026-08-05',
+        platform,
+        itemType: 'post',
+      },
+    ],
     provenance: {
       providerId: id,
       platform,

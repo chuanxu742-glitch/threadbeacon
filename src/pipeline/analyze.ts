@@ -1,17 +1,10 @@
-// 端到端编排：provider → 脱敏（provider 内完成）→ 聚类 → LLM 归纳 → 聚类级产物。
-//
-// 全流程只有一处接触原文：聚类的输入。原文不进产物、不进日志。
+// 端到端编排：provider → 聚类 → LLM 归纳 → 产物（洞察 + 全量原始记录）。
 
 import { ClusteringService, type ClusterResult } from '../clustering/ClusteringService.js';
 import type { ILlmClient } from '../llm/types.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import { textsOf, type Platform, type TextBundle } from '../providers/types.js';
-import {
-  containsVerbatim,
-  gradeQuality,
-  type AnalysisReport,
-  type PainPoint,
-} from './report.js';
+import { gradeQuality, type AnalysisReport, type PainPoint } from './report.js';
 
 export interface AnalyzeDeps {
   readonly registry: ProviderRegistry;
@@ -71,18 +64,17 @@ async function collect(deps: AnalyzeDeps, req: AnalyzeRequest): Promise<TextBund
 }
 
 const SYSTEM_PROMPT = [
-  '你是用户需求分析师。输入是一组语义相近的用户反馈，它们已经过脱敏处理。',
+  '你是用户需求分析师。输入是一组语义相近的用户反馈。',
   '你的任务是把这组反馈归纳成一个用户痛点。',
   '',
-  '硬性要求：',
-  '1. summary 必须是你自己的概括表述，**不得摘录、复述或拼接原文片段**。',
-  '   原文可被回搜到来源，逐字引用会破坏数据的匿名性。',
-  '2. 不要提及任何具体人名、账号、链接、时间点或地名，即使输入里出现了。',
-  '3. 只描述群体层面的共性问题，不描述任何单个个体的情况。',
+  '要求：',
+  '1. theme 是概括这组反馈的主题短语。',
+  '2. summary 用两三句话讲清楚这组用户在抱怨什么、诉求是什么。',
+  '3. keywords 取最能代表这组反馈的几个词。',
   '',
   '仅输出 JSON，不要代码块围栏，不要额外说明：',
   '{"theme":"主题短语","summary":"两三句概括","keywords":["词1","词2"],"severity":0}',
-  'severity 取 0–5 的整数，表示该痛点的严重程度。',
+  'severity 取 0-5 的整数，表示该痛点的严重程度。',
 ].join('\n');
 
 /** LLM 有时会套代码块围栏，剥掉后再解析。 */
@@ -110,34 +102,25 @@ export async function analyze(
   const clustered = await deps.clustering.cluster(texts);
 
   const painPoints: PainPoint[] = [];
-  let redactedSummaries = 0;
-
   for (const cluster of clustered.clusters) {
     const analyzed = await summarize(deps.llm, cluster);
-    if (!analyzed) continue;
-
-    // 最后一道闸：LLM 若逐字回显了原文，丢弃该表述而不是把它写进产物
-    if (containsVerbatim(analyzed.summary, cluster.texts)) {
-      redactedSummaries += 1;
-      painPoints.push({ ...analyzed, summary: fallbackSummary(analyzed.theme, cluster.size) });
-      continue;
-    }
-    painPoints.push(analyzed);
+    if (analyzed) painPoints.push(analyzed);
   }
 
   painPoints.sort((a, b) => b.severity * b.size - a.severity * a.size);
 
   return {
     painPoints,
+    items: bundle.items,
     provenance: bundle.provenance,
     stats: {
       totalTexts: clustered.totalTexts,
       clusteredTexts: clustered.clusteredTexts,
       clusterCount: clustered.clusterCount,
       noiseCount: clustered.noiseCount,
-      redactedSummaries,
     },
     dataQuality: gradeQuality(clustered.clusteredTexts),
+    keyword: req.keyword,
     generatedAt: new Date().toISOString(),
   };
 }
@@ -169,9 +152,9 @@ async function summarize(llm: ILlmClient, cluster: ClusterResult): Promise<PainP
     size: cluster.size,
     keywords: asStringArray(o['keywords']),
     severity: clampSeverity(o['severity']),
+    texts: cluster.texts,
+    // ClusterResult.indices 已由聚类层还原成原始输入数组的下标，
+    // 与 report.items 一一对应
+    memberIndices: cluster.indices,
   };
-}
-
-function fallbackSummary(theme: string, size: number): string {
-  return `约 ${size} 条反馈集中在「${theme}」，因原始表述无法安全概括而略去细节。`;
 }

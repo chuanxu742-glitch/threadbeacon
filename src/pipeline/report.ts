@@ -1,26 +1,24 @@
-// 分析产物的类型与泄漏检查。
+// 分析产物的类型。
 //
-// 这里的类型是「什么会被持久化」的唯一定义，依据 docs/GDPR架构边界.md §0：
-// 采集与聚类阶段仍是个人数据处理，但**持久化的聚类级输出**可以达到匿名标准，
-// 从而摆脱数据保留、DSAR 响应与跨境传输三块义务。
-//
-// 因此 AnalysisReport 里刻意没有：原文、单条记录、作者信息、精确时间。
+// AnalysisReport 同时承载两样东西：LLM 归纳出的聚类级洞察（painPoints），
+// 以及采集到的全部原始记录（items）。导出层从这一个对象派生 JSON 与 CSV。
 
-import type { Provenance } from '../providers/types.js';
+import type { Provenance, SourceItem } from '../providers/types.js';
 
 export interface PainPoint {
   /** LLM 归纳的主题短语。 */
   readonly theme: string;
-  /**
-   * 代表性表述。**必须是改写，不得摘录原文** ——
-   * 原文可回搜到原帖，会击穿 EDPB 匿名化三重测试里的 No Linkage。
-   */
+  /** 代表性表述，由 LLM 概括。 */
   readonly summary: string;
-  /** 簇规模。低于 K_ANONYMITY_FLOOR 的簇不会走到这里。 */
+  /** 簇规模。 */
   readonly size: number;
   readonly keywords: readonly string[];
-  /** 严重度 0–5，由 LLM 评估。 */
+  /** 严重度 0-5，由 LLM 评估。 */
   readonly severity: number;
+  /** 簇内原文，按位对应 memberIndices。 */
+  readonly texts: readonly string[];
+  /** 簇成员在 items 数组里的下标，用于把痛点关联回原始记录。 */
+  readonly memberIndices: readonly number[];
 }
 
 /**
@@ -40,63 +38,15 @@ export interface AnalysisStats {
   readonly clusteredTexts: number;
   readonly clusterCount: number;
   readonly noiseCount: number;
-  /** 因疑似逐字引用原文而被替换的表述条数。持续 >0 说明提示词需要收紧。 */
-  readonly redactedSummaries: number;
 }
 
 export interface AnalysisReport {
   readonly painPoints: readonly PainPoint[];
+  /** 本次采集到的全部记录，顺序与 PainPoint.memberIndices 对应。 */
+  readonly items: readonly SourceItem[];
   readonly provenance: Provenance;
   readonly stats: AnalysisStats;
   readonly dataQuality: DataQuality;
+  readonly keyword: string;
   readonly generatedAt: string;
-}
-
-// 判定逐字引用所用的最短片段长度，按文字体系区分。
-//
-// 一个汉字承载的信息量远高于一个拉丁字母：12 个汉字通常已是完整短句、
-// 足以被搜索引擎回溯到原帖；而 12 个拉丁字符只有两三个词，用同样的阈值
-// 会把常见短语误判成摘录。所以 CJK 用更短的窗口。
-const SHINGLE_CJK = 12;
-const SHINGLE_LATIN = 25;
-
-const CJK = /[぀-ヿ㐀-䶿一-鿿가-힯豈-﫿]/g;
-
-const normalize = (s: string): string => s.replace(/\s+/g, ' ').trim();
-
-/** CJK 字符占比超过三成就按 CJK 处理，混排文本从严。 */
-function shingleFor(text: string): number {
-  const cjk = text.match(CJK)?.length ?? 0;
-  return cjk / text.length > 0.3 ? SHINGLE_CJK : SHINGLE_LATIN;
-}
-
-/**
- * 检测 summary 是否逐字包含了任一输入文本的片段。
- *
- * 局限：这是滑窗子串匹配，能抓住整条回显与长片段摘录，
- * 抓不住改写幅度很小的转述。它是防线而非证明 ——
- * 真正的保证来自提示词约束加人工抽检。
- */
-export function containsVerbatim(summary: string, inputs: readonly string[]): boolean {
-  const hay = normalize(summary);
-  if (hay.length === 0) return false;
-
-  for (const raw of inputs) {
-    const needle = normalize(raw);
-    if (needle.length === 0) continue;
-
-    const shingle = shingleFor(needle);
-    if (needle.length <= shingle) {
-      if (hay.includes(needle)) return true;
-      continue;
-    }
-    // 步长取窗口的一半，保证任意长度 >= shingle 的连续摘录都会被某个窗口覆盖
-    const stride = Math.max(1, Math.floor(shingle / 2));
-    for (let i = 0; i + shingle <= needle.length; i += stride) {
-      if (hay.includes(needle.slice(i, i + shingle))) return true;
-    }
-    // 末尾不足一个步长的残余窗口单独补一次，避免尾部摘录漏检
-    if (hay.includes(needle.slice(needle.length - shingle))) return true;
-  }
-  return false;
 }

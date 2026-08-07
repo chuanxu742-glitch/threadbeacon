@@ -1,33 +1,30 @@
-// Provider 基类：统一 provenance 构造与脱敏入口。
+// Provider 基类：统一 provenance 构造与打包入口。
 //
 // 子类只负责「怎么把平台响应变成 RawObservation」，
-// 最小化与脱敏一律走 buildSourceItems()，没有旁路。
+// 打包一律走 bundle()，provenance 由基类填，不让子类自报。
 
-import { buildSourceItems, type PiiRecognizer, type RawObservation } from '../privacy/minimize.js';
+import { buildSourceItems } from './item.js';
 import type { HttpPort } from './http.js';
 import type {
   AcquisitionMode,
   IDataProvider,
   Provenance,
   ProviderCapability,
+  RawObservation,
   TextBundle,
 } from './types.js';
 
 export interface BaseProviderDeps {
   readonly http: HttpPort;
-  /** 可选的 NER 脱敏层。生产环境接 Presidio 本地部署。 */
-  readonly recognizer?: PiiRecognizer;
 }
 
 export abstract class BaseProvider implements IDataProvider {
   abstract readonly capability: ProviderCapability;
 
   protected readonly http: HttpPort;
-  protected readonly recognizer: PiiRecognizer | undefined;
 
   constructor(deps: BaseProviderDeps) {
     this.http = deps.http;
-    this.recognizer = deps.recognizer;
   }
 
   /**
@@ -40,7 +37,7 @@ export abstract class BaseProvider implements IDataProvider {
     raws: readonly RawObservation[],
     mode: AcquisitionMode,
   ): Promise<TextBundle> {
-    const items = await buildSourceItems(raws, this.recognizer);
+    const items = buildSourceItems(raws);
     const provenance: Provenance = {
       providerId: this.capability.id,
       platform: this.capability.platform,

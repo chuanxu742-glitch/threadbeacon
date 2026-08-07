@@ -23,22 +23,44 @@
 // -----------------------------------------------------------------------------
 
 import { BaseProvider, paginate, type BaseProviderDeps } from './base.js';
-import type { RawObservation } from '../privacy/minimize.js';
-import type { ProviderCapability, SearchQuery, TextBundle } from './types.js';
+import type { ProviderCapability, RawObservation, SearchQuery, TextBundle } from './types.js';
 
 const DEFAULT_ENDPOINT = 'https://public.api.bsky.app';
 const PAGE_SIZE = 100; // searchPosts 单页上限
 
-/** 只声明本 provider 实际读取的字段，其余一律不碰。 */
 interface SearchPostsResponse {
   readonly posts?: ReadonlyArray<{
+    readonly uri?: string;
+    readonly cid?: string;
+    readonly indexedAt?: string;
+    readonly author?: {
+      readonly did?: string;
+      readonly handle?: string;
+      readonly displayName?: string;
+      readonly avatar?: string;
+    };
     readonly record?: {
       readonly text?: string;
       readonly createdAt?: string;
       readonly langs?: readonly string[];
     };
+    readonly likeCount?: number;
+    readonly replyCount?: number;
+    readonly repostCount?: number;
+    readonly quoteCount?: number;
   }>;
   readonly cursor?: string;
+}
+
+/** at://did/collection/rkey 的最后一段就是 rkey。 */
+function rkeyOf(uri: string | undefined): string | undefined {
+  return uri?.split('/').pop() || undefined;
+}
+
+/** 由 at:// uri 拼出网页链接。 */
+function webUrl(uri: string | undefined, did: string | undefined): string | undefined {
+  const rkey = rkeyOf(uri);
+  return did && rkey ? `https://bsky.app/profile/${did}/post/${rkey}` : undefined;
 }
 
 export interface BlueskyProviderOptions extends BaseProviderDeps {
@@ -97,13 +119,33 @@ export class BlueskyProvider extends BaseProvider {
       for (const post of res.posts ?? []) {
         const text = post.record?.text;
         const createdAt = post.record?.createdAt;
-        // 缺文本或缺时间的条目直接丢弃 —— 时间要用来做降采样，补不出来
+        // 缺文本或缺时间的条目直接丢弃 —— 时间字段补不出来
         if (!text || !createdAt) continue;
+        const did = post.author?.did;
+        const rkey = rkeyOf(post.uri);
+        const url = webUrl(post.uri, did);
         items.push({
           text,
           observedAt: createdAt,
           platform: 'bluesky',
+          itemType: 'post',
+          ...(rkey ? { id: rkey } : {}),
+          ...(post.author?.handle ? { author: post.author.handle } : {}),
+          ...(did ? { authorId: did } : {}),
+          ...(url ? { url } : {}),
           ...(post.record?.langs?.[0] !== undefined ? { lang: post.record.langs[0] } : {}),
+          metrics: {
+            likes: post.likeCount ?? 0,
+            comments: post.replyCount ?? 0,
+            shares: (post.repostCount ?? 0) + (post.quoteCount ?? 0),
+          },
+          raw: {
+            atUri: post.uri,
+            cid: post.cid,
+            indexedAt: post.indexedAt,
+            displayName: post.author?.displayName,
+            avatar: post.author?.avatar,
+          },
         });
       }
       return { items, ...(res.cursor !== undefined ? { cursor: res.cursor } : {}) };

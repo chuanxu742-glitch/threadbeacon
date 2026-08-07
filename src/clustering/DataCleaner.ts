@@ -5,10 +5,11 @@
 // 来源：https://github.com/liangdabiao/SeekMoney-ai
 //       lib/services/clustering/DataCleaner.ts
 // 许可：MIT，Copyright (c) 2025 liangdabiao。完整声明见仓库根目录 NOTICE。
-// 本地改动：无（原样复用）。
 //
-// 注意：本模块做的是「噪音过滤与质量打分」，不是 PII 脱敏。
-// 脱敏在 src/privacy/minimize.ts，且发生在更早的 ingest 阶段。
+// 本地改动：
+//   clean() 增加返回 indices —— 保留项在输入数组里的原始下标。
+//   上游只返回过滤后的 texts，下游因此无法把聚类结果关联回原始记录；
+//   而本项目要把痛点关联回 SourceItem 做导出，这个映射是必需的。
 // ---------------------------------------------------------------------------
 
 /**
@@ -195,14 +196,17 @@ export class DataCleaner {
 
   /**
    * 清洗文本列表
-   * @returns [清洗后的文本列表, 对应的质量分数]
+   * @returns 清洗后的文本、对应质量分数，以及各项在输入数组里的原始下标
    */
-  clean(texts: string[]): { texts: string[]; scores: number[] } {
+  clean(texts: string[]): { texts: string[]; scores: number[]; indices: number[] } {
     const cleanedTexts: string[] = [];
     const scores: number[] = [];
+    const indices: number[] = [];
     const seen = new Set<string>();
 
-    for (const text of texts) {
+    for (let i = 0; i < texts.length; i++) {
+      const text = texts[i];
+      if (text === undefined) continue;
       const trimmed = text.trim();
 
       // 跳过噪音
@@ -227,11 +231,13 @@ export class DataCleaner {
 
       cleanedTexts.push(trimmed);
       scores.push(score);
+      indices.push(i);
     }
 
     return {
       texts: cleanedTexts,
-      scores
+      scores,
+      indices
     };
   }
 

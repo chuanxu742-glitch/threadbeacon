@@ -7,9 +7,9 @@
 // 许可：MIT，Copyright (c) 2025 liangdabiao。完整声明见仓库根目录 NOTICE。
 //
 // 本地改动：
-//   1. minSamples 默认值 3 -> K_ANONYMITY_FLOOR (10)，并加下限强制。
-//      依据 docs/GDPR架构边界.md §7.3：小簇会击穿 EDPB 的 No Inference 测试。
-//   2. 相对 import 补 .js 扩展名以适配 ESM。
+//   1. 相对 import 补 .js 扩展名以适配 ESM。
+//   2. 修复就地排序破坏 texts 与 indices 对应关系的缺陷。
+//   3. 补齐未检查的数组下标访问（pickByIndex）。
 // ---------------------------------------------------------------------------
 
 import { createEmbeddingProvider, createConfigFromEnv, IEmbeddingProvider } from './EmbeddingProvider.js';
@@ -42,11 +42,10 @@ function longest(texts: readonly string[]): string {
 // ==================== 类型定义 ====================
 
 /**
- * 注意 `texts` 与 `representative` 持有的是**原始文本**。
+ * `texts` 与 `representative` 持有原始文本。
  *
- * 它们可以在内存中流转，但不得直接持久化 —— 原文可回搜到原帖，
- * 会击穿 EDPB 匿名化三重测试里的 No Linkage。
- * 持久化前必须经改写（paraphrase），见 docs/GDPR架构边界.md §7.3 第 3 条。
+ * `indices` 是簇成员在**传给 cluster() 的原始数组**里的下标，
+ * 已还原过清洗阶段的过滤与去重，可直接用来关联回 SourceItem。
  */
 export interface ClusterResult {
   representative: string;
@@ -57,11 +56,8 @@ export interface ClusterResult {
   keywords: string[];
 }
 
-/**
- * k-匿名下限。簇规模低于此值时无法通过 No Inference 测试
- * （例："某地某公司的 3 个用户抱怨 X" 足以反推到具体个人）。
- */
-export const K_ANONYMITY_FLOOR = 10;
+/** DBSCAN 的默认最小簇规模。小于它的点归为噪声，由算法本身决定。 */
+export const DEFAULT_MIN_SAMPLES = 2;
 
 export interface ClusteringOptions {
   eps?: number; // DBSCAN 邻域半径 (余弦距离)
@@ -69,14 +65,6 @@ export interface ClusteringOptions {
   minQuality?: number; // 最小质量分数
   maxClusters?: number; // 最大簇数量
   enableCleaning?: boolean; // 是否启用数据清洗
-  /**
-   * 允许 minSamples 低于 K_ANONYMITY_FLOOR。
-   *
-   * 仅用于语料确定不含个人数据的场景（单元测试、合成数据）。
-   * 对真实社媒数据启用它会使聚类输出无法主张匿名化，
-   * 从而丧失 docs/GDPR架构边界.md §0 描述的全部下游豁免。
-   */
-  unsafeAllowSmallClusters?: boolean;
 }
 
 export interface ClusteringResult {
@@ -122,25 +110,12 @@ export class ClusteringService {
     this.dataCleaner = new DataCleaner();
     this.defaultOptions = {
       eps: 0.3, // 余弦距离阈值 (越小越严格)
-      minSamples: K_ANONYMITY_FLOOR, // 最小簇大小；上游默认为 3，见文件头改动说明
+      minSamples: DEFAULT_MIN_SAMPLES,
       minQuality: 0.5, // 最小质量分数
       maxClusters: 50, // 最大簇数量
       enableCleaning: true,
       ...options
     };
-  }
-
-  /** 强制 k-匿名下限，除非调用方显式声明语料不含个人数据。 */
-  private enforceKAnonymity(opts: ClusteringOptions): ClusteringOptions {
-    const requested = opts.minSamples ?? K_ANONYMITY_FLOOR;
-    if (requested >= K_ANONYMITY_FLOOR || opts.unsafeAllowSmallClusters) {
-      return opts;
-    }
-    throw new RangeError(
-      `minSamples=${requested} 低于 k-匿名下限 ${K_ANONYMITY_FLOOR}。` +
-        `小簇无法通过 EDPB 的 No Inference 测试，聚类输出将不能主张匿名化。` +
-        `若语料确定不含个人数据，请显式传 unsafeAllowSmallClusters: true。`
-    );
   }
 
   /**
@@ -150,7 +125,7 @@ export class ClusteringService {
     const startTime = Date.now();
     this.steps = [];
 
-    const opts = this.enforceKAnonymity({ ...this.defaultOptions, ...options });
+    const opts = { ...this.defaultOptions, ...options };
 
     console.log(`[ClusteringService] 开始处理 ${texts.length} 条文本`);
     console.log(`[ClusteringService] 提供商: ${this.embeddingProvider.getName()} | 模型: ${this.embeddingProvider.getModel()}`);
@@ -158,6 +133,8 @@ export class ClusteringService {
     // Step 1: 数据清洗
     let cleanTexts = texts;
     let cleanScores: number[] = [];
+    // 清洗后各项在原始数组里的下标。不清洗时就是恒等映射。
+    let originIndices = texts.map((_, i) => i);
     const originalCount = texts.length;
 
     if (opts.enableCleaning) {
@@ -166,6 +143,7 @@ export class ClusteringService {
       });
       cleanTexts = cleanResult.texts;
       cleanScores = cleanResult.scores;
+      originIndices = cleanResult.indices;
       console.log(`[ClusteringService] 清洗后: ${cleanTexts.length}/${originalCount} 条保留`);
     }
 
@@ -190,6 +168,7 @@ export class ClusteringService {
         dbscanResult.clusters,
         cleanTexts,
         cleanScores,
+        originIndices,
         opts.maxClusters!
       );
     });
@@ -273,6 +252,7 @@ export class ClusteringService {
     clusters: number[][],
     texts: string[],
     scores: number[],
+    originIndices: number[],
     maxClusters: number
   ): ClusterResult[] {
     const results: ClusterResult[] = [];
@@ -283,6 +263,8 @@ export class ClusteringService {
 
       const clusterTexts = pickByIndex(texts, cluster);
       const clusterScores = cluster.map(idx => scores[idx] ?? 0);
+      // DBSCAN 给的是清洗后数组的下标，映射回原始数组才能关联到 SourceItem
+      const clusterOrigins = pickByIndex(originIndices, cluster);
 
       // 选择代表性文本 (最长且包含白名单关键词)
       const representative = this.selectRepresentative(clusterTexts);
@@ -293,7 +275,7 @@ export class ClusteringService {
       results.push({
         representative,
         texts: clusterTexts,
-        indices: cluster,
+        indices: clusterOrigins,
         size: cluster.length,
         avgQuality: clusterScores.reduce((a, b) => a + b, 0) / clusterScores.length,
         keywords

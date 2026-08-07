@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { ClusteringService, K_ANONYMITY_FLOOR } from '../src/clustering/ClusteringService.js';
+import { ClusteringService, DEFAULT_MIN_SAMPLES } from '../src/clustering/ClusteringService.js';
+import { DataCleaner } from '../src/clustering/DataCleaner.js';
 import { FakeEmbeddingProvider } from './helpers/fakeEmbedding.js';
 
 const PROBES = ['续航', '价格', '客服'] as const;
 
-/** 三个主题各 4 条。真实场景下簇规模须 ≥ K_ANONYMITY_FLOOR，此处是合成语料。 */
+/** 三个主题各 4 条。 */
 const TEXTS = [
   '这个手机续航太差了，一天要充两次电',
   '续航能力完全不行，出门必须带充电宝',
@@ -20,12 +21,12 @@ const TEXTS = [
   '客服流程太繁琐，退货折腾了一周',
 ];
 
-const smallClusterOpts = { minSamples: 3, unsafeAllowSmallClusters: true } as const;
+const opts = { minSamples: 3 } as const;
 
 describe('ClusteringService', () => {
   it('零 API key、零数据供应商依赖即可运行', async () => {
     const svc = new ClusteringService(new FakeEmbeddingProvider(PROBES));
-    const result = await svc.cluster(TEXTS, smallClusterOpts);
+    const result = await svc.cluster(TEXTS, opts);
 
     expect(result.provider).toBe('fake');
     expect(result.totalTexts).toBe(TEXTS.length);
@@ -34,7 +35,7 @@ describe('ClusteringService', () => {
 
   it('把语义相近的文本聚成预期的簇', async () => {
     const svc = new ClusteringService(new FakeEmbeddingProvider(PROBES));
-    const result = await svc.cluster(TEXTS, smallClusterOpts);
+    const result = await svc.cluster(TEXTS, opts);
 
     expect(result.clusterCount).toBe(PROBES.length);
     expect(result.noiseCount).toBe(0);
@@ -47,30 +48,48 @@ describe('ClusteringService', () => {
       for (const t of cluster.texts) expect(t).toContain(probe);
     }
   });
-});
 
-describe('k-匿名下限', () => {
-  it('默认 minSamples 等于 K_ANONYMITY_FLOOR', () => {
-    expect(K_ANONYMITY_FLOOR).toBe(10);
-  });
-
-  it('minSamples 低于下限时拒绝执行', async () => {
-    const svc = new ClusteringService(new FakeEmbeddingProvider(PROBES));
-    await expect(svc.cluster(TEXTS, { minSamples: 3 })).rejects.toThrow(RangeError);
-  });
-
-  it('仅在显式声明语料不含个人数据时放行', async () => {
-    const svc = new ClusteringService(new FakeEmbeddingProvider(PROBES));
-    await expect(
-      svc.cluster(TEXTS, { minSamples: 3, unsafeAllowSmallClusters: true }),
-    ).resolves.toBeDefined();
-  });
-
-  it('默认配置下小簇不会成簇', async () => {
+  it('默认 minSamples 是 2，小簇照样成簇', async () => {
+    expect(DEFAULT_MIN_SAMPLES).toBe(2);
     const svc = new ClusteringService(new FakeEmbeddingProvider(PROBES));
     const result = await svc.cluster(TEXTS);
-    // 每组只有 4 条，达不到下限 10，应全部落入噪声
-    expect(result.clusterCount).toBe(0);
-    expect(result.noiseCount).toBe(TEXTS.length);
+    expect(result.clusterCount).toBe(PROBES.length);
+  });
+
+  it('indices 指回原始输入数组，不受清洗过滤影响', async () => {
+    // 掺入会被清洗掉的噪音，使清洗后下标与原始下标错位
+    const noisy = ['!!!', ...TEXTS.slice(0, 4), '哈哈', ...TEXTS.slice(4)];
+    const svc = new ClusteringService(new FakeEmbeddingProvider(PROBES));
+    const result = await svc.cluster(noisy, opts);
+
+    for (const cluster of result.clusters) {
+      expect(cluster.indices).toHaveLength(cluster.size);
+      // indices[i] 指向的原始文本必须就是 texts[i]
+      cluster.indices.forEach((origin, i) => {
+        expect(noisy[origin]).toBe(cluster.texts[i]);
+      });
+    }
+  });
+});
+
+describe('DataCleaner', () => {
+  it('clean 返回保留项在原始数组里的下标', () => {
+    const cleaner = new DataCleaner();
+    const input = ['!!!', '这个手机续航太差了，一天要充两次电', '哈哈', '价格实在太贵了，性价比很低'];
+    const out = cleaner.clean(input);
+
+    expect(out.texts).toHaveLength(out.indices.length);
+    out.indices.forEach((origin, i) => {
+      expect(input[origin]).toBe(out.texts[i]);
+    });
+  });
+
+  it('去重后下标仍指向首次出现的位置', () => {
+    const cleaner = new DataCleaner();
+    const dup = '这个手机续航太差了，一天要充两次电';
+    const out = cleaner.clean([dup, dup]);
+
+    expect(out.texts).toHaveLength(1);
+    expect(out.indices).toEqual([0]);
   });
 });

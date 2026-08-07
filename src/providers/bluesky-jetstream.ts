@@ -10,22 +10,32 @@
 // 想覆盖某个话题就得持续订阅，而不是发一次查询。
 
 import { BaseProvider, type BaseProviderDeps } from './base.js';
-import type { RawObservation } from '../privacy/minimize.js';
-import type { ProviderCapability, StreamQuery, TextBundle } from './types.js';
+import type { ProviderCapability, RawObservation, StreamQuery, TextBundle } from './types.js';
 
 const DEFAULT_ENDPOINT = 'wss://jetstream2.us-east.bsky.network/subscribe';
 const POST_COLLECTION = 'app.bsky.feed.post';
 
 /** Jetstream 的 commit 事件，只声明本 provider 读取的字段。 */
 interface JetstreamEvent {
+  readonly did?: string;
+  readonly time_us?: number;
   readonly kind?: string;
   readonly commit?: {
+    readonly rev?: string;
     readonly operation?: string;
     readonly collection?: string;
+    readonly rkey?: string;
+    readonly cid?: string;
     readonly record?: {
       readonly text?: string;
       readonly createdAt?: string;
       readonly langs?: readonly string[];
+      readonly reply?: {
+        readonly root?: { readonly uri?: string };
+        readonly parent?: { readonly uri?: string };
+      };
+      readonly embed?: unknown;
+      readonly facets?: unknown;
     };
   };
 }
@@ -96,16 +106,39 @@ export class BlueskyJetstreamProvider extends BaseProvider {
         const commit = parsed.commit;
         if (commit?.operation !== 'create' || commit.collection !== POST_COLLECTION) return;
 
-        const text = commit.record?.text;
-        const createdAt = commit.record?.createdAt;
+        const record = commit.record;
+        const text = record?.text;
+        const createdAt = record?.createdAt;
         if (!text || !createdAt) return;
         if (!text.toLowerCase().includes(needle)) return;
+
+        // AT Protocol 的记录地址：at://{did}/{collection}/{rkey}，
+        // 对应的网页链接是 bsky.app/profile/{did}/post/{rkey}
+        const did = parsed.did;
+        const rkey = commit.rkey;
+        const atUri = did && rkey ? `at://${did}/${POST_COLLECTION}/${rkey}` : undefined;
+        // 回复的 parent 是 at:// uri，直接作为 parentId 关联回被回复的帖子
+        const parent = record?.reply?.parent?.uri;
 
         collected.push({
           text,
           observedAt: createdAt,
           platform: 'bluesky',
-          ...(commit.record?.langs?.[0] !== undefined ? { lang: commit.record.langs[0] } : {}),
+          itemType: record?.reply ? 'comment' : 'post',
+          ...(rkey ? { id: rkey } : {}),
+          ...(parent ? { parentId: parent } : {}),
+          ...(did ? { authorId: did } : {}),
+          ...(did && rkey ? { url: `https://bsky.app/profile/${did}/post/${rkey}` } : {}),
+          ...(record?.langs?.[0] !== undefined ? { lang: record.langs[0] } : {}),
+          raw: {
+            atUri,
+            cid: commit.cid,
+            rev: commit.rev,
+            timeUs: parsed.time_us,
+            replyRoot: record?.reply?.root?.uri,
+            embed: record?.embed,
+            facets: record?.facets,
+          },
         });
         if (collected.length >= query.limit) finish();
       };

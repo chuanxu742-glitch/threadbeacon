@@ -9,8 +9,7 @@
 // 见 docs/行业合规范式.md §2。
 
 import { BaseProvider, paginate, type BaseProviderDeps } from './base.js';
-import type { RawObservation } from '../privacy/minimize.js';
-import type { ProviderCapability, SearchQuery, TextBundle } from './types.js';
+import type { ProviderCapability, RawObservation, SearchQuery, TextBundle } from './types.js';
 
 const TOKEN_URL = 'https://www.reddit.com/api/v1/access_token';
 const API_BASE = 'https://oauth.reddit.com';
@@ -23,16 +22,29 @@ interface TokenResponse {
   readonly expires_in?: number;
 }
 
+interface PostData {
+  readonly id?: string;
+  readonly name?: string;
+  readonly title?: string;
+  readonly selftext?: string;
+  readonly created_utc?: number;
+  readonly author?: string;
+  readonly author_fullname?: string;
+  readonly permalink?: string;
+  readonly url?: string;
+  readonly subreddit?: string;
+  readonly score?: number;
+  readonly ups?: number;
+  readonly num_comments?: number;
+  readonly num_crossposts?: number;
+  readonly over_18?: boolean;
+  readonly link_flair_text?: string;
+}
+
 interface ListingResponse {
   readonly data?: {
     readonly after?: string | null;
-    readonly children?: ReadonlyArray<{
-      readonly data?: {
-        readonly title?: string;
-        readonly selftext?: string;
-        readonly created_utc?: number;
-      };
-    }>;
+    readonly children?: ReadonlyArray<{ readonly data?: PostData }>;
   };
 }
 
@@ -115,13 +127,32 @@ export class RedditProvider extends BaseProvider {
       for (const child of res.data?.children ?? []) {
         const d = child.data;
         if (!d || d.created_utc === undefined) continue;
-        // 标题与正文合成一条：分析层要的是语义，不是版式
+        // 标题与正文合成一条：分析层要的是语义，不是版式。
+        // title 同时单独留一份，导出时分列。
         const text = [d.title, d.selftext].filter((s): s is string => !!s?.trim()).join('\n\n');
         if (!text) continue;
         items.push({
           text,
           observedAt: new Date(d.created_utc * 1000),
           platform: 'reddit',
+          itemType: 'post',
+          ...(d.id ? { id: d.id } : {}),
+          ...(d.author ? { author: d.author } : {}),
+          ...(d.author_fullname ? { authorId: d.author_fullname } : {}),
+          ...(d.permalink ? { url: `https://www.reddit.com${d.permalink}` } : {}),
+          ...(d.title ? { title: d.title } : {}),
+          metrics: {
+            likes: d.score ?? d.ups ?? 0,
+            comments: d.num_comments ?? 0,
+            shares: d.num_crossposts ?? 0,
+          },
+          raw: {
+            subreddit: d.subreddit,
+            fullname: d.name,
+            outboundUrl: d.url,
+            flair: d.link_flair_text,
+            over18: d.over_18,
+          },
         });
       }
       const next = res.data?.after;

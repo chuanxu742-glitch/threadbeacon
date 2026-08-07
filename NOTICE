@@ -15,6 +15,11 @@ modifications.
   src/clustering/EmbeddingProvider.ts
   src/clustering/DataCleaner.ts
 
+Local modifications are summarized in each file's header. In brief: ESM import
+extensions, bounds-checked index access, a fix for in-place sorting that broke
+the texts/indices correspondence, and an added `indices` return from
+DataCleaner.clean() so cluster members can be traced back to the input records.
+
 Original copyright notice, reproduced in full as required by the MIT License:
 
     MIT License

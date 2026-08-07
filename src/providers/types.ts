@@ -1,7 +1,7 @@
 // 数据接入层的类型契约。
 //
-// 设计原则：把合规约束编码进类型，而不是写在文档里。
-// 依据 docs/GDPR架构边界.md §7 —— data minimization by architecture。
+// 把「平台」与「供应商」拆成两个维度，取数模式显式化，
+// 让各 provider 的能力差异在类型层面可见而不是靠文档约定。
 
 import type { AuthMode } from './http.js';
 
@@ -132,24 +132,73 @@ export interface Provenance {
   readonly auth: AuthMode;
 }
 
+/** 记录的形态。帖子与评论在导出时分表，需要在类型上区分。 */
+export type ItemType = 'post' | 'comment';
+
+/** 互动量。各平台字段名不同，在 provider 里归一到这四项，缺的留空。 */
+export interface Metrics {
+  readonly likes?: number;
+  readonly comments?: number;
+  readonly shares?: number;
+  readonly views?: number;
+}
+
 /**
- * 单条数据的最小化记录。
+ * 单条采集记录，保留原始字段。
  *
- * 这个类型「缺什么」比「有什么」更重要 —— 以下字段被刻意排除，
- * 使标识符在类型层面就无处存放（docs/GDPR架构边界.md §7.1）：
- *   作者 handle / user ID / 头像 URL / 个人主页链接 / 原帖 permalink /
- *   精确时间戳 / 地理坐标 / 粉丝数等准标识符 / 设备指纹
+ * 设计取向是**尽量不丢信息**：文本原样保留，作者、链接、精确时间戳一并留存，
+ * 平台特有字段进 `raw`。下游的聚类只吃 `text`，其余字段供导出与二次处理。
  */
 export interface SourceItem {
-  /** 已经过 PII 脱敏的文本。未脱敏文本不得构造成 SourceItem。 */
+  /** 原文，不做改写。 */
   readonly text: string;
-  /** 时间桶，降采样到日：YYYY-MM-DD。精确时间戳是准标识符，不保留。 */
+  /** 发布时刻，ISO 8601，保留原始精度。 */
+  readonly postedAt: string;
+  /** 由 postedAt 派生的日期，YYYY-MM-DD。仅为按日聚合方便，不是脱敏措施。 */
   readonly timeBucket: string;
   readonly platform: Platform;
-  /** 国家级地区，ISO 3166-1 alpha-2。不接受更细粒度。 */
+  readonly itemType: ItemType;
+  /** 平台内的记录 ID（帖子 id / 评论 id / 视频 id）。 */
+  readonly id?: string;
+  /** 评论所属的帖子 ID，用于把评论表关联回帖子表。 */
+  readonly parentId?: string;
+  /** 作者显示名或 handle，平台返回什么就存什么。 */
+  readonly author?: string;
+  /** 作者在平台内的稳定 ID，与 author 可能不同（如 Reddit 的 t2_xxx）。 */
+  readonly authorId?: string;
+  /** 原帖链接。 */
+  readonly url?: string;
+  /** 标题，帖子/视频有，评论没有。 */
+  readonly title?: string;
+  readonly metrics?: Metrics;
   readonly region?: string;
   /** BCP 47 语言标签。 */
   readonly lang?: string;
+  /** 平台原始响应片段，供 JSON 全量导出与二次处理。 */
+  readonly raw?: Record<string, unknown>;
+}
+
+/**
+ * provider 解析平台响应后的中间形态。
+ *
+ * 与 SourceItem 的差别只有 `observedAt` 接受 Date 或字符串、
+ * `timeBucket` 由 buildSourceItem 派生。其余字段一一对应。
+ */
+export interface RawObservation {
+  readonly text: string;
+  readonly observedAt: Date | string;
+  readonly platform: Platform;
+  readonly itemType?: ItemType;
+  readonly id?: string;
+  readonly parentId?: string;
+  readonly author?: string;
+  readonly authorId?: string;
+  readonly url?: string;
+  readonly title?: string;
+  readonly metrics?: Metrics;
+  readonly region?: string;
+  readonly lang?: string;
+  readonly raw?: Record<string, unknown>;
 }
 
 /** provider 的统一返回。下游分析层只认这个。 */
