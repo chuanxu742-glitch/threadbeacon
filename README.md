@@ -181,7 +181,7 @@ LLM 凭据；控制平面只会把平台匹配的任务派给该节点。`THREAD
 控制平面通过 `workflow_run_jobs` 聚合运行状态；任一来源最终失败会停止同运行的其他来源。
 运行级取消/重试、节点检查点和事件 Trace 均可在 Studio 中操作。OpenCLI 目录由 Worker 启动时
 动态发现并核对实际二进制版本；CDP 未配置或健康检查失败时不会上报依赖浏览器的能力，避免任务
-被路由到实际不可执行的节点。当前锁定版本扫描到 171 个只读站点，需要时可为来源显式指定只读 command/args。
+被路由到实际不可执行的节点。当前锁定版本扫描到 1,257 条命令；无 CDP 时有 316 条只读命令、79 个站点可调度，需要时可为来源显式指定只读 command/args。
 GEO 按参考项目的受控能力方式发布 `official-site.observe@1.0.0`，复用现有任务队列、取消/重试、
 PostgreSQL 独立执行状态、30 秒租约、S3/MinIO 报告与 Trace；只有配置了健康 CDP、声明
 `THREADBEACON_BROWSER_PROFILE_KIND=anonymous` 且通过完整 Cookie jar 空值证明的 Worker 才会上报该能力。
@@ -349,7 +349,7 @@ git clone https://github.com/liangdabiao/SeekMoney-ai reference/SeekMoney-ai
   CDP 仅在容器内网开放，本地 Owner 使用 Basic Auth，注册密钥与凭据加密根密钥分离
 - 传统执行集群：独立 Gateway 镜像、Compose 集群文件与 Helm Chart；StatefulSet 为每个 Agent
   保存独立 Worker 身份和 Chromium Profile，并提供 Secret、PDB、NetworkPolicy、探针和资源限制
-- OpenCLI 动态适配：锁定并在 Worker 启动时验证 1.8.5，发现 171 个站点 / 1,257 个命令；常用站点
+- OpenCLI 动态适配：锁定并在 Worker 启动时验证 1.8.5，发现 1,257 个命令；当前无 CDP 时可执行 316 条只读命令、覆盖 79 个站点；常用站点
   自动选择搜索或发现命令，特殊站点允许显式指定只读命令和参数；浏览器命令仅在 CDP 健康时上报
 - 数据接入层契约：平台与供应商拆成两个维度，获取模式区分 `searchAll` / `fetchOwned` / `streamLive`
 - 取数护栏：凭据分档（Cookie 恒禁 / 应用级凭据放行）、按 host 平滑限流（≤1 QPS）、
@@ -397,7 +397,7 @@ git clone https://github.com/liangdabiao/SeekMoney-ai reference/SeekMoney-ai
 | Bilibili / 知乎 / 微博 / X / LinkedIn | OpenCLI + 自有浏览器会话 | 依命令 | ⚠️ 已接入动态能力，需本机登录与连接测试 |
 | Hacker News | OpenCLI 公开 API | ❌ | ✅ `search` 已真实请求验证 |
 | 雪球 / 东方财富 | OpenCLI | 依命令 | ⚠️ 已接入，受地区、登录态与页面变化约束 |
-| 其余 OpenCLI 站点 | 动态目录 | 依命令 | 171 个站点均可调度；自动发现失败时可指定只读命令与参数 |
+| 其余 OpenCLI 站点 | 动态目录 | 依命令 | 能力按实际二进制动态上报；当前无 CDP 时为 316 条只读命令/79 个站点 |
 | GEO 官网观测 | OpenCLI CDP Bridge + 匿名 Profile | ❌ | ✅ `official-site.observe@1.0.0`；SSRF、DNS、robots 与个性化页面拒绝 |
 
 OpenCLI 通过外部进程接入，ThreadBeacon 不复制它的站点适配代码、Cookie 或签名实现。Bilibili 等
@@ -419,6 +419,10 @@ TikHub 那四个平台的字段映射来自上游 SeekMoney-ai 跑通过的解�
 | `docs/行业合规范式.md` | 合法同行怎么拿数据、可采购清单与顺序 |
 | `docs/GDPR架构边界.md` | ⚠️ 历史调研。描述的是一套靠架构达成匿名化的设计，已不是当前实现 |
 | `docs/二开方案.md` | 六阶段实施方案 |
+| `docs/兼容矩阵.md` | 已验收环境、平台能力与明确排除项 |
+| `docs/故障排查.md` | 原生、Worker、CDP、Gateway 与存储排障 |
+| `docs/备份恢复与升级.md` | PostgreSQL/MinIO 备份恢复、HA 边界与升级检查单 |
+| `docs/发布流程.md` | 开源版本与多架构镜像发布流程 |
 
 ## 参与贡献
 

@@ -64,7 +64,7 @@ Graceful Agent disconnect or Gateway shutdown produces an explicit failure callb
 
 ## Multi-Gateway coordination
 
-`GatewayCoordination` separates connection routing from leases/results. `InMemoryGatewayCoordination` is the only supported implementation, so a Gateway deployment must remain single-instance. Add an external coordination implementation only when multi-Gateway routing becomes a concrete deployment requirement.
+Gateway leases and result caching are intentionally implemented by `InMemoryGatewayCoordination` without a one-implementation abstraction. A Gateway deployment must remain single-instance. Introduce an external coordination contract only when multi-Gateway routing becomes a concrete deployment requirement.
 
 The control plane registers a Gateway as a node using the existing registration endpoint with runtime data:
 

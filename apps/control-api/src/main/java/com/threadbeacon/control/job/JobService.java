@@ -1,6 +1,7 @@
 package com.threadbeacon.control.job;
 
 import com.threadbeacon.control.common.ApiException;
+import com.threadbeacon.control.common.SecretBox;
 import com.threadbeacon.control.node.WorkerNode;
 import com.threadbeacon.control.platform.WorkflowRuntimeService;
 import com.threadbeacon.control.platform.DeliveryService;
@@ -32,15 +33,17 @@ public class JobService {
     private final ObjectStore objects;
     private final WorkflowRuntimeService workflowRuntime;
     private final DeliveryService deliveries;
+    private final SecretBox secrets;
 
     public JobService(JdbcTemplate jdbc, TransactionTemplate transactions, ObjectMapper mapper, ObjectStore objects,
-                      WorkflowRuntimeService workflowRuntime, DeliveryService deliveries) {
+                      WorkflowRuntimeService workflowRuntime, DeliveryService deliveries, SecretBox secrets) {
         this.jdbc = jdbc;
         this.transactions = transactions;
         this.mapper = mapper;
         this.objects = objects;
         this.workflowRuntime = workflowRuntime;
         this.deliveries = deliveries;
+        this.secrets = secrets;
     }
 
     public Map<String, Object> create(String ownerId, Map<String, Object> input) {
@@ -147,6 +150,13 @@ public class JobService {
                     """, node.id(), id(), timestamp, Instant.now().plus(30, ChronoUnit.SECONDS).toString(), timestamp, timestamp, jobId);
             }
             var result = new LinkedHashMap<>(selected);
+            var options = new LinkedHashMap<>(object(parse(mapper, selected.get("source_options_json"), Map.of())));
+            if ("fetchOwned".equals(text(options.get("mode")))) {
+                var encrypted = text(options.remove("grantHandleEncrypted"));
+                if (encrypted.isBlank()) throw new ApiException(HttpStatus.CONFLICT, "自有账号任务缺少加密授权句柄");
+                options.put("grantHandle", secrets.decrypt(encrypted));
+                result.put("source_options_json", json(mapper, options));
+            }
             result.put("attempt", integer(selected.get("attempt"), 0) + 1);
             return result;
         });

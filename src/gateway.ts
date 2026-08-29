@@ -7,7 +7,7 @@ import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import WebSocket, { WebSocketServer } from 'ws';
-import { InMemoryGatewayCoordination, type GatewayCoordination, type GatewayResultEnvelope } from './gateway-coordination.js';
+import { InMemoryGatewayCoordination, type GatewayResultEnvelope } from './gateway-coordination.js';
 import { GATEWAY_PROTOCOL_VERSION, parseAgentMessage, parseGatewayJob, type GatewayJob, type GatewayToAgentMessage } from './gateway-protocol.js';
 import { loadWorkerStateFile, saveWorkerStateFile, type NodeCredentials } from './worker.js';
 
@@ -75,7 +75,7 @@ export class AgentGateway {
   private sweep?: ReturnType<typeof setInterval>;
   private readonly snapshotListeners = new Set<() => void>();
   private resultSink: GatewayResultSink | null = null;
-  constructor(readonly config: GatewayConfig, readonly coordination: GatewayCoordination = new InMemoryGatewayCoordination()) {
+  constructor(readonly config: GatewayConfig, readonly coordination = new InMemoryGatewayCoordination()) {
     this.server.on('upgrade', (request, socket, head) => {
       const path = new URL(request.url ?? '/', 'http://gateway.local').pathname;
       if (path !== '/agent' || !authorized(request, config.agentToken)) { socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); socket.destroy(); return; }
@@ -129,6 +129,7 @@ export class AgentGateway {
       connectedAgents: agents.length,
     };
   }
+  disconnectAgents(reason = 'operator requested reconnect') { for (const agent of this.agents.values()) agent.socket.close(1012, reason); }
   onSnapshotChange(listener: () => void) { this.snapshotListeners.add(listener); return () => this.snapshotListeners.delete(listener); }
   setResultSink(sink: GatewayResultSink | null) { this.resultSink = sink; }
   private notifySnapshot() { for (const listener of this.snapshotListeners) listener(); }
@@ -193,7 +194,7 @@ export class AgentGateway {
       const path = new URL(request.url ?? '/', 'http://gateway.local').pathname;
       if (request.method === 'GET' && path === '/healthz') { json(response, 200, { state: 'ready', protocolVersion: GATEWAY_PROTOCOL_VERSION }); return; }
       if (!authorized(request, this.config.controlToken)) { response.setHeader('www-authenticate', 'Bearer'); json(response, 401, { error: 'Bearer token 无效' }); return; }
-      if (request.method === 'GET' && path === '/health') { const snapshot = this.snapshot(); json(response, 200, { state: 'ready', gatewayId: this.config.gatewayId, agentCount: snapshot.connectedAgents, activeJobs: snapshot.activeJobs, coordination: this.coordination instanceof InMemoryGatewayCoordination ? 'memory' : 'external' }); return; }
+      if (request.method === 'GET' && path === '/health') { const snapshot = this.snapshot(); json(response, 200, { state: 'ready', gatewayId: this.config.gatewayId, agentCount: snapshot.connectedAgents, activeJobs: snapshot.activeJobs, coordination: 'memory' }); return; }
       if (request.method === 'GET' && path === '/capabilities') { json(response, 200, { capabilities: [...new Set([...this.agents.values()].flatMap((agent) => [...agent.capabilities]))], agents: [...this.agents.values()].map((agent) => ({ id: agent.id, activeJobs: agent.activeJobs, maxConcurrency: agent.maxConcurrency, capabilities: [...agent.capabilities], lastSeenAt: new Date(agent.lastSeenAt).toISOString() })) }); return; }
       if (request.method === 'POST' && path === '/dispatch') {
         const input = await body(request); const value = input && typeof input === 'object' ? input as Record<string, unknown> : {};

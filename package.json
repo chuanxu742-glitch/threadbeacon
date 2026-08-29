@@ -22,6 +22,7 @@
     "control:dev": "pnpm --dir apps/control-plane dev",
     "control:doctor": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/native-control.mjs doctor",
     "control:native": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/native-control.mjs start",
+    "backup:native": "pwsh -NoProfile -File scripts/backup-native.ps1",
     "control:build": "pnpm --dir apps/control-plane build",
     "control:java:check": "node scripts/java-control.mjs test",
     "control:lint": "pnpm --dir apps/control-plane lint",

@@ -28,7 +28,7 @@ public class SecretBox {
             cipher.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(128, nonce));
             var encrypted = cipher.doFinal(value.getBytes(StandardCharsets.UTF_8));
             return Base64.getUrlEncoder().withoutPadding().encodeToString(ByteBuffer.allocate(nonce.length + encrypted.length).put(nonce).put(encrypted).array());
-        } catch (Exception error) { throw new IllegalStateException("加密浏览器动作失败", error); }
+        } catch (Exception error) { throw new IllegalStateException("加密敏感值失败", error); }
     }
 
     public String decrypt(String value) {
@@ -37,6 +37,6 @@ public class SecretBox {
             System.arraycopy(bytes, 0, nonce, 0, nonce.length);System.arraycopy(bytes, nonce.length, encrypted, 0, encrypted.length);
             var cipher = Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(128, nonce));
             return new String(cipher.doFinal(encrypted), StandardCharsets.UTF_8);
-        } catch (Exception error) { throw new IllegalStateException("解密浏览器动作失败", error); }
+        } catch (Exception error) { throw new IllegalStateException("解密敏感值失败", error); }
     }
 }

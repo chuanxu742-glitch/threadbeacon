@@ -261,6 +261,7 @@ function availablePlatforms(
     ...new Set([
       ...registry.platformsSupporting('searchAll'),
       ...registry.platformsSupporting('streamLive'),
+      ...registry.platformsSupporting('fetchOwned'),
       ...openCliCapabilities(catalog) as Platform[],
       ...(['rss', 'rest', 'web'] as Platform[]),
       ...(geoCapabilityReady(catalog, env) && isFreshAnonymousAttestation(browserAttestation) ? ['geo' as Platform] : []),
@@ -512,6 +513,19 @@ function attachWorkflowExecution(report: Record<string, unknown>, options: Recor
     : report;
 }
 
+export async function executeCreatorOwned(job: ControlJob, registry: ProviderRegistry): Promise<unknown> {
+  const options = taskOptions(job); const grantHandle = typeof options['grantHandle'] === 'string' ? options['grantHandle'].trim() : '';
+  if (!grantHandle) throw new Error('自有账号任务缺少授权句柄');
+  const provider = registry.resolve(job.platform, 'fetchOwned');
+  if (!provider?.fetchOwned) throw new Error(`平台 ${job.platform} 没有已启用的 fetchOwned Provider`);
+  const bundle = await provider.fetchOwned({ grantHandle, limit: job.limit });
+  return attachWorkflowExecution({
+    painPoints: [], items: bundle.items, provenance: bundle.provenance,
+    stats: { totalTexts: bundle.items.length, clusteredTexts: 0, clusterCount: 0, noiseCount: 0, summarizedClusters: 0, skippedClusters: 0 },
+    dataQuality: 'authorized-first-party', keyword: job.keyword, generatedAt: new Date().toISOString(), acquisitionMode: 'fetchOwned',
+  }, options);
+}
+
 async function executeJob(job: ControlJob, catalog: readonly OpenCliCommand[]): Promise<unknown> {
   const options = taskOptions(job);
   if (job.platform === 'geo') {
@@ -541,6 +555,7 @@ async function executeJob(job: ControlJob, catalog: readonly OpenCliCommand[]): 
   } else {
     registry = buildRegistry();
   }
+  if (options['mode'] === 'fetchOwned') return executeCreatorOwned(job, registry);
   if (options['sourceTest'] === true) {
     const provider = registry.resolve(job.platform, 'searchAll');
     if (!provider?.searchAll) throw new Error(`平台 ${job.platform} 不支持连接测试`);

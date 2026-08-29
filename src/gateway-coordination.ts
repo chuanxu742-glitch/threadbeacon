@@ -8,21 +8,10 @@ export interface GatewayResultEnvelope {
   attempt?: number;
 }
 
-export interface GatewayCoordination {
-  acquireLease(jobId: string, owner: string, ttlMs: number): Promise<boolean>;
-  renewLease(jobId: string, owner: string, ttlMs: number): Promise<boolean>;
-  releaseLease(jobId: string, owner: string): Promise<void>;
-  getResult(jobId: string): Promise<GatewayResultEnvelope | null>;
-  deleteResult(jobId: string): Promise<void>;
-  publishResult(result: GatewayResultEnvelope, ttlMs: number): Promise<void>;
-  waitForResult(jobId: string, timeoutMs: number): Promise<GatewayResultEnvelope | null>;
-  close(): Promise<void>;
-}
-
 interface Lease { owner: string; expiresAt: number }
 interface Cached { result: GatewayResultEnvelope; expiresAt: number }
 
-export class InMemoryGatewayCoordination implements GatewayCoordination {
+export class InMemoryGatewayCoordination {
   private readonly leases = new Map<string, Lease>();
   private readonly results = new Map<string, Cached>();
   private readonly waiters = new Map<string, Set<(result: GatewayResultEnvelope) => void>>();

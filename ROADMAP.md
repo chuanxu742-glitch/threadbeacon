@@ -31,19 +31,24 @@ This file is the source of truth for unfinished product validation. A checked it
   - [ ] RSS: retry exhaustion and control-plane cursor reuse passed; real fetch is blocked by this host's reserved-range DNS proxy.
   - [ ] Public web: retry exhaustion passed; real fetch/robots acceptance is blocked by the same DNS proxy.
 - [x] Add Reddit comment collection and Jetstream DID-to-handle enrichment.
-- [ ] Add the authenticated creator-owned `fetchOwned` API with explicit scope and audit records.
+- [x] Add the authenticated creator-owned `fetchOwned` API with explicit scope and audit records.
 - [ ] Execute imported Dify code/tool/plugin nodes in an isolated sandbox before declaring them supported.
+  - [x] Fail closed at import and workflow publication; arbitrary nodes never execute in the Java/Node process.
+  - [ ] Provision and attest a real isolated runtime before enabling these node types (no container runtime is installed on this host).
 
 ## P2 — deployment and open-source release
 
 - [ ] Run the complete Docker Compose acceptance suite on a Docker-enabled host.
 - [ ] Publish Docker Buildx images for amd64 and arm64 and verify recovery on both architectures.
-- [ ] Validate Gateway dispatch and agent reconnect behavior; keep single-Gateway scope until external coordination is required.
+- [x] Validate Gateway dispatch and agent reconnect behavior; keep single-Gateway scope until external coordination is required.
 - [ ] Validate cluster manifests, network policies, secrets, health probes, and rolling updates.
 - [ ] Document and test PostgreSQL/MinIO backup, restore, multi-replica, high-availability, and rolling-upgrade procedures.
+  - [x] Native logical PostgreSQL + MinIO backup, checksum verification, isolated restore, and cleanup.
+  - [x] Document Compose/cluster HA boundaries and rolling-upgrade procedure.
+  - [ ] Exercise multi-replica and rolling upgrade on a real Docker/Kubernetes environment.
 - [ ] Run credentialed provider smoke tests for each documented provider without committing secrets.
-- [ ] Review the public platform catalog against the documented supported/excluded sources.
-- [ ] Complete release documentation: native quickstart, architecture limits, compatibility matrix, and troubleshooting.
+- [x] Review the public platform catalog against the documented supported/excluded sources.
+- [x] Complete release documentation: native quickstart, architecture limits, compatibility matrix, and troubleshooting.
 
 ## Ponytail cleanup queue
 
@@ -51,4 +56,4 @@ This file is the source of truth for unfinished product validation. A checked it
 - [x] Reuse browser allowlist normalization/matching instead of maintaining two implementations.
 - [x] Remove unused proxy/export helpers.
 - [x] Delete the unusable direct `BlueskyProvider`; keep the registered Jetstream runtime path.
-- [ ] Collapse the single-implementation `GatewayCoordination` interface only if multi-Gateway coordination remains out of scope.
+- [x] Collapse the single-implementation `GatewayCoordination` interface only if multi-Gateway coordination remains out of scope.

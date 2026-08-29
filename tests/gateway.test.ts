@@ -60,7 +60,16 @@ describe('Agent Gateway', () => {
       const base = { id: 'retry-job-12345', platform: 'rss', keyword: 'retry', source_options_json: '{}', limit: 10, include_comments: 0 };
       await gateway.dispatchAsync({ ...base, attempt: 1 });
       for (let attempt = 0; attempt < 30 && callbacks.length < 1; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      gateway.disconnectAgents('reconnect acceptance');
+      let disconnected = false;
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        const value = await (await fetch(`${url}/capabilities`, { headers })).json() as { agents: unknown[] };
+        if (!value.agents.length) disconnected = true;
+        if (disconnected && value.agents.length) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(disconnected).toBe(true);
+      expect(gateway.snapshot().connectedAgents).toBe(1);
       await gateway.dispatchAsync({ ...base, attempt: 2 });
       for (let attempt = 0; attempt < 30 && callbacks.length < 2; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
       expect(executions).toEqual([1, 2]);

@@ -8,6 +8,7 @@ import {
 import { ProviderRegistry } from '../src/providers/registry.js';
 import type { IDataProvider, Platform, ProviderKind, TextBundle } from '../src/providers/types.js';
 import { textsOf } from '../src/providers/types.js';
+import { executeCreatorOwned } from '../src/worker.js';
 
 function stubProvider(
   id: string,
@@ -169,5 +170,26 @@ describe('textsOf', () => {
     const p = stubProvider('x', 'reddit', 'official-api', ['searchAll']);
     const bundle = await p.searchAll!({ keyword: 'k', limit: 1 });
     expect(textsOf(bundle)).toEqual(['hello']);
+  });
+});
+
+describe('creator-owned acquisition', () => {
+  it('dispatches only through fetchOwned and never needs an LLM', async () => {
+    let received = '';
+    const provider = stubProvider('creator', 'youtube', 'user-authorized', ['fetchOwned']);
+    provider.fetchOwned = async (ref) => { received = ref.grantHandle; return stubProvider('creator', 'youtube', 'user-authorized', ['fetchOwned']).fetchOwned!(ref); };
+    const report = await executeCreatorOwned({
+      id: 'owned-job', platform: 'youtube', keyword: 'creator-owned', limit: 5, include_comments: 1, attempt: 1,
+      source_options_json: JSON.stringify({ mode: 'fetchOwned', grantHandle: 'opaque-grant-handle' }),
+    }, new ProviderRegistry().register(provider)) as { acquisitionMode: string; items: unknown[] };
+    expect(received).toBe('opaque-grant-handle');
+    expect(report).toMatchObject({ acquisitionMode: 'fetchOwned', items: [expect.objectContaining({ text: 'hello' })] });
+  });
+
+  it('fails closed when no authorized provider is enabled', async () => {
+    await expect(executeCreatorOwned({
+      id: 'owned-job', platform: 'youtube', keyword: 'creator-owned', limit: 5, include_comments: 1, attempt: 1,
+      source_options_json: JSON.stringify({ mode: 'fetchOwned', grantHandle: 'opaque-grant-handle' }),
+    }, new ProviderRegistry())).rejects.toThrow('没有已启用');
   });
 });
