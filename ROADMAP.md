@@ -21,10 +21,10 @@ This file is the source of truth for unfinished product validation. A checked it
 ## P1 — governed integrations
 
 - [ ] Validate browser Profile attestation and a real CDP session: open, navigate, snapshot, click/type, screenshot, and close; cover browser-login OpenCLI adapters for Bilibili, Zhihu, Weibo, X, and LinkedIn.
-- [ ] Validate Skill execution, confirmation, correction proposal, rollback, lease expiry, and restart recovery.
-- [ ] Validate personal API tokens and MCP tools, including scope enforcement and revocation.
-- [ ] Validate webhook triggers and delivery rules with retry/failure audit records.
-- [ ] Validate workspace invitations and owner/editor/viewer authorization boundaries.
+- [x] Validate Skill execution, confirmation, correction proposal, rollback, lease expiry, and restart recovery.
+- [x] Validate personal API tokens and MCP tools, including scope enforcement and revocation.
+- [x] Validate webhook triggers and delivery rules with retry/failure audit records.
+- [x] Validate workspace invitations and owner/editor/viewer authorization boundaries.
 - [ ] Validate GEO official-site submission, SSRF/robots enforcement, trace artifacts, cancel, and idempotency.
 - [ ] Validate RSS, REST, and public-web source cursors and failure recovery.
 - [ ] Add Reddit comment collection and Jetstream DID-to-handle enrichment.

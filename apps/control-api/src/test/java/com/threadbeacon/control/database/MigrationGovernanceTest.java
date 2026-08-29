@@ -54,4 +54,13 @@ class MigrationGovernanceTest {
                 "ALTER TABLE api_tokens ADD COLUMN role");
         assertThat(sql).doesNotContain("PRAGMA");
     }
+
+    @Test
+    void deliveryMigrationAddsPerAttemptAudit() throws Exception {
+        var resource = getClass().getResourceAsStream("/db/migration/V4__delivery_retry_audit.sql");
+        assertThat(resource).isNotNull();
+        var sql = new String(resource.readAllBytes(), StandardCharsets.UTF_8);
+        assertThat(sql).contains("ADD COLUMN attempt INTEGER", "idx_delivery_logs_rule_job_attempt");
+        assertThat(sql).doesNotContain("PRAGMA");
+    }
 }

@@ -30,7 +30,7 @@ public class WorkspaceAccessController {
         var timestamp=now();transactions.executeWithoutResult(status->{
             var changed=jdbc.update("UPDATE workspace_invitations SET accepted_at=?,accepted_by=?,updated_at=? WHERE id=? AND accepted_at IS NULL AND revoked_at IS NULL",timestamp,user.userId(),timestamp,invitation.get("id"));
             if(changed!=1)throw new ApiException(HttpStatus.CONFLICT,"邀请已被其他请求使用");
-            jdbc.update("INSERT INTO workspace_members(id,workspace_id,user_id,role,created_at) VALUES(?,?,?,?,?) ON CONFLICT(workspace_id,user_id) DO UPDATE SET role=excluded.role",id(),invitation.get("workspace_id"),user.userId(),invitation.get("role"),timestamp);
+            jdbc.update("INSERT INTO workspace_members(id,workspace_id,user_id,role,created_at) VALUES(?,?,?,?,?) ON CONFLICT(workspace_id,user_id) DO UPDATE SET role=CASE WHEN workspace_members.role='owner' THEN workspace_members.role ELSE excluded.role END",id(),invitation.get("workspace_id"),user.userId(),invitation.get("role"),timestamp);
             jdbc.update("INSERT INTO workspace_member_profiles(id,workspace_id,user_id,email,display_name,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(workspace_id,user_id) DO UPDATE SET email=excluded.email,display_name=excluded.display_name,updated_at=excluded.updated_at",id(),invitation.get("workspace_id"),user.userId(),user.email(),user.displayName(),timestamp);
         });
         return Map.of("ok",true,"workspaceId",invitation.get("workspace_id"),"role",invitation.get("role"));

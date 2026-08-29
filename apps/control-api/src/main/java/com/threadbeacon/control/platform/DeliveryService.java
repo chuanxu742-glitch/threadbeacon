@@ -21,6 +21,7 @@ import static com.threadbeacon.control.common.Values.text;
 
 @Service
 public class DeliveryService {
+    private static final int MAX_ATTEMPTS = 3;
     private final JdbcTemplate jdbc; private final SecretBox secrets; private final ObjectMapper mapper;
     private final MeterRegistry metrics;
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5))
@@ -33,21 +34,30 @@ public class DeliveryService {
     @Async
     public void deliver(String ownerId, String jobId, Map<String, Object> payload) {
         for (var rule : jdbc.queryForList("SELECT * FROM delivery_rules WHERE owner_id=? AND enabled=1", ownerId)) {
-            var status="failed"; Integer responseCode=null; String error=null;
-            try {
-                var endpoint=URI.create(secrets.decrypt(text(rule.get("endpoint_encrypted"))));
-                assertPublicHttps(endpoint);
-                var body=mapper.writeValueAsString(Map.of("event","threadbeacon.job.completed","kind",rule.get("kind"),"jobId",jobId,"payload",payload));
-                var response=client.send(HttpRequest.newBuilder(endpoint).timeout(Duration.ofSeconds(15))
-                        .header("content-type","application/json").header("user-agent","threadbeacon-delivery/1.0")
-                        .POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.discarding());
-                responseCode=response.statusCode(); status=responseCode>=200&&responseCode<300?"succeeded":"failed";
-                if (!"succeeded".equals(status)) error="HTTP "+responseCode;
-            } catch (Exception failure) { error=safeError(failure); }
-            jdbc.update("INSERT INTO delivery_logs(id,owner_id,rule_id,job_id,status,response_code,error,created_at) VALUES(?,?,?,?,?,?,?,?)",
-                    id(),ownerId,rule.get("id"),jobId,status,responseCode,error,now());
-            metrics.counter("threadbeacon.deliveries", "status", status, "kind", text(rule.get("kind"))).increment();
+            for (var attempt=1; attempt<=MAX_ATTEMPTS; attempt++) {
+                var status="failed"; Integer responseCode=null; String error=null;
+                try {
+                    var endpoint=URI.create(secrets.decrypt(text(rule.get("endpoint_encrypted"))));
+                    assertPublicHttps(endpoint);
+                    var body=mapper.writeValueAsString(Map.of("event","threadbeacon.job.completed","kind",rule.get("kind"),"jobId",jobId,"payload",payload));
+                    var response=client.send(HttpRequest.newBuilder(endpoint).timeout(Duration.ofSeconds(15))
+                            .header("content-type","application/json").header("user-agent","threadbeacon-delivery/1.0")
+                            .POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.discarding());
+                    responseCode=response.statusCode(); status=responseCode>=200&&responseCode<300?"succeeded":"failed";
+                    if (!"succeeded".equals(status)) error="HTTP "+responseCode;
+                } catch (Exception failure) { error=safeError(failure); }
+                jdbc.update("INSERT INTO delivery_logs(id,owner_id,rule_id,job_id,status,response_code,error,attempt,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                        id(),ownerId,rule.get("id"),jobId,status,responseCode,error,attempt,now());
+                metrics.counter("threadbeacon.deliveries", "status", status, "kind", text(rule.get("kind"))).increment();
+                if ("succeeded".equals(status) || !retryable(responseCode) || attempt==MAX_ATTEMPTS) break;
+                try { Thread.sleep(250L * attempt); }
+                catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); break; }
+            }
         }
+    }
+
+    static boolean retryable(Integer responseCode) {
+        return responseCode == null || responseCode == 408 || responseCode == 429 || responseCode >= 500;
     }
 
     private void assertPublicHttps(URI endpoint) throws Exception {

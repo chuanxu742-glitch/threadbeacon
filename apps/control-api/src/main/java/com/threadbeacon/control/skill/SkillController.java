@@ -26,22 +26,26 @@ public class SkillController {
 
     @GetMapping
     Map<String, Object> list() {
+        user.requireScope("skills:read");
         return Map.of("skills", skills.list(user.ownerId()));
     }
 
     @PostMapping
     ResponseEntity<Map<String, Object>> create(@RequestBody Map<String, Object> body) {
+        user.requireScope("skills:run");
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(Map.of("skill", skills.create(user.ownerId(), body)));
     }
 
     @GetMapping("/{id}")
     Map<String, Object> get(@PathVariable String id) {
+        user.requireScope("skills:read");
         return skills.get(user.ownerId(), id);
     }
 
     @PostMapping("/{id}/publish")
     Map<String, Object> publish(@PathVariable String id) {
+        user.requireScope("skills:run");
         return Map.of("skill", skills.publish(user.ownerId(), id));
     }
 
@@ -50,12 +54,14 @@ public class SkillController {
             @PathVariable String id,
             @RequestBody Map<String, Object> body
     ) {
+        user.requireScope("skills:run");
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(Map.of("run", skills.startRun(user.ownerId(), id, body)));
     }
 
     @GetMapping("/runs/{runId}")
     Map<String, Object> run(@PathVariable String runId) {
+        user.requireScope("runs:read");
         return Map.of("run", skills.run(user.ownerId(), runId));
     }
 
@@ -64,6 +70,7 @@ public class SkillController {
             @PathVariable String runId,
             @RequestBody Map<String, Object> body
     ) {
+        user.requireScope("skills:run");
         return skills.appendEvent(user.ownerId(), runId, body);
     }
 
@@ -72,6 +79,7 @@ public class SkillController {
             @PathVariable String runId,
             @RequestBody Map<String, Object> body
     ) {
+        user.requireScope("skills:run");
         var run = skills.completeRun(user.ownerId(), runId, body);
         workflowRuntime.skillFinished(value(run, "workflow_run_id"), value(run, "workflow_node_id"), value(run, "status"), run);
         return Map.of("run", run);
@@ -79,6 +87,7 @@ public class SkillController {
 
     @PostMapping("/runs/{runId}/reviews/{reviewId}/approve")
     Map<String, Object> approve(@PathVariable String runId, @PathVariable String reviewId) {
+        user.requireScope("skills:run");
         var run = skills.resolveReview(user.ownerId(), runId, reviewId, true);
         workflowRuntime.skillResumed(value(run, "workflow_run_id"));
         return Map.of("run", run);
@@ -86,6 +95,7 @@ public class SkillController {
 
     @PostMapping("/runs/{runId}/reviews/{reviewId}/reject")
     Map<String, Object> reject(@PathVariable String runId, @PathVariable String reviewId) {
+        user.requireScope("skills:run");
         var run = skills.resolveReview(user.ownerId(), runId, reviewId, false);
         workflowRuntime.skillFinished(value(run, "workflow_run_id"), value(run, "workflow_node_id"), value(run, "status"), run);
         return Map.of("run", run);
@@ -97,6 +107,7 @@ public class SkillController {
             @PathVariable String correctionId,
             @RequestBody Map<String, Object> body
     ) {
+        user.requireScope("skills:run");
         return Map.of("skill", skills.applyCorrection(
                 user.ownerId(), skillId, correctionId, body));
     }
@@ -106,6 +117,7 @@ public class SkillController {
             @PathVariable String skillId,
             @PathVariable String correctionId
     ) {
+        user.requireScope("skills:run");
         return Map.of("skill", skills.dismissCorrection(
                 user.ownerId(), skillId, correctionId));
     }
@@ -115,11 +127,13 @@ public class SkillController {
             @PathVariable String skillId,
             @PathVariable String correctionId
     ) {
+        user.requireScope("skills:run");
         return Map.of("skill", skills.rollback(user.ownerId(), skillId, correctionId));
     }
 
     @PostMapping("/risk/classify")
     Map<String, Object> classify(@RequestBody Map<String, Object> body) {
+        user.requireScope("skills:read");
         var elements = SkillElements.from(body.get("elements"));
         var decision = SkillRiskPolicy.classify(
                 object(body.get("action")), object(body.get("element")), elements);

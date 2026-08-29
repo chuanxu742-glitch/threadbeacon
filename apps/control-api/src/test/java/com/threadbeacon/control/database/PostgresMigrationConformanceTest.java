@@ -34,7 +34,7 @@ class PostgresMigrationConformanceTest {
         try {
             flyway.clean();
             var result = flyway.migrate();
-            assertThat(result.migrationsExecuted).isEqualTo(3);
+            assertThat(result.migrationsExecuted).isEqualTo(4);
             try (var connection = DriverManager.getConnection(url, user, password);
                  var statement = connection.prepareStatement("""
                          SELECT table_name FROM information_schema.tables
