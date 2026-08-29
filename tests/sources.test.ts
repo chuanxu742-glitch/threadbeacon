@@ -110,6 +110,48 @@ describe('RedditProvider', () => {
     const p = new RedditProvider({ http: port, ...deps });
     expect(p.capability.legalBasis).toMatch(/非商业/);
   });
+
+  it('includeComments 时追加顶层评论和回复', async () => {
+    const commentsReply = [
+      { data: { children: [] } },
+      {
+        data: {
+          children: [{
+            kind: 't1',
+            data: {
+              id: 'comment1', name: 't1_comment1', body: 'Top comment', created_utc: 1785000100,
+              author: 'alice', parent_id: 't3_post1', link_id: 't3_post1', score: 7,
+              permalink: '/r/test/comments/post1/title/comment1/',
+              replies: {
+                data: {
+                  children: [{ kind: 't1', data: {
+                    id: 'reply1', body: 'Nested reply', created_utc: 1785000200,
+                    author: 'bob', parent_id: 't1_comment1', link_id: 't3_post1',
+                  } }],
+                },
+              },
+            },
+          }],
+        },
+      },
+    ];
+    const { port, calls } = fakeHttp([
+      { match: 'access_token', reply: { access_token: 'tok', expires_in: 3600 } },
+      { match: '/search', reply: { data: { children: [{ data: {
+        id: 'post1', title: 'Post', created_utc: 1785000000,
+      } }] } } },
+      { match: '/comments/post1', reply: commentsReply },
+    ], 'app-credential');
+    const p = new RedditProvider({ http: port, ...deps });
+
+    const bundle = await p.searchAll({ keyword: 'x', limit: 5, includeComments: true });
+
+    expect(p.capability.canFetchComments).toBe(true);
+    expect(calls.some((call) => call.includes('/comments/post1'))).toBe(true);
+    expect(bundle.items.map((item) => item.text)).toEqual(['Post', 'Top comment', 'Nested reply']);
+    expect(bundle.items[1]).toMatchObject({ itemType: 'comment', id: 'comment1', parentId: 'post1', author: 'alice' });
+    expect(bundle.items[2]).toMatchObject({ itemType: 'comment', id: 'reply1', parentId: 'comment1', author: 'bob' });
+  });
 });
 
 describe('YouTubeProvider', () => {

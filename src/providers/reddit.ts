@@ -14,6 +14,7 @@ import type { ProviderCapability, RawObservation, SearchQuery, TextBundle } from
 const TOKEN_URL = 'https://www.reddit.com/api/v1/access_token';
 const API_BASE = 'https://oauth.reddit.com';
 const PAGE_SIZE = 100; // listing 单页上限
+const COMMENT_LIMIT_PER_POST = 20;
 /** token 提前过期的安全余量，避免边界上用到刚失效的 token。 */
 const TOKEN_SKEW_MS = 60_000;
 
@@ -44,8 +45,15 @@ interface PostData {
 interface ListingResponse {
   readonly data?: {
     readonly after?: string | null;
-    readonly children?: ReadonlyArray<{ readonly data?: PostData }>;
+    readonly children?: ReadonlyArray<{ readonly kind?: string; readonly data?: PostData & CommentData }>;
   };
+}
+
+interface CommentData {
+  readonly body?: string;
+  readonly parent_id?: string;
+  readonly link_id?: string;
+  readonly replies?: '' | ListingResponse;
 }
 
 export interface RedditProviderOptions extends BaseProviderDeps {
@@ -78,7 +86,7 @@ export class RedditProvider extends BaseProvider {
       platform: 'reddit',
       kind: 'official-api',
       modes: ['searchAll'],
-      canFetchComments: false,
+      canFetchComments: true,
       legalBasis:
         opts.legalBasis ??
         'Reddit Data API，OAuth client_credentials 应用级授权。免费档仅限非商业用途，商用须另行签约',
@@ -159,6 +167,56 @@ export class RedditProvider extends BaseProvider {
       return { items, ...(next ? { cursor: next } : {}) };
     });
 
-    return this.bundle(posts, 'searchAll');
+    if (!query.includeComments) return this.bundle(posts, 'searchAll');
+
+    const comments: RawObservation[] = [];
+    for (const post of posts) {
+      if (!post.id) continue;
+      const url = new URL(`/comments/${post.id}`, API_BASE);
+      url.searchParams.set('limit', String(COMMENT_LIMIT_PER_POST));
+      url.searchParams.set('depth', '3');
+      url.searchParams.set('sort', 'top');
+      url.searchParams.set('raw_json', '1');
+      try {
+        const response = await this.http.getJson<readonly [ListingResponse, ListingResponse]>(url.toString(), headers);
+        comments.push(...this.comments(response[1], post.id).slice(0, COMMENT_LIMIT_PER_POST));
+      } catch {
+        // 单帖评论关闭、删除或权限不足时保留帖子，不中断整轮检索。
+      }
+    }
+    return this.bundle([...posts, ...comments], 'searchAll');
+  }
+
+  private comments(listing: ListingResponse | undefined, postId: string): RawObservation[] {
+    const result: RawObservation[] = [];
+    const visit = (value: ListingResponse | undefined, depth: number): void => {
+      for (const child of value?.data?.children ?? []) {
+        if (child.kind && child.kind !== 't1') continue;
+        const comment = child.data;
+        if (!comment?.body || comment.created_utc === undefined) continue;
+        result.push({
+          text: comment.body,
+          observedAt: new Date(comment.created_utc * 1000),
+          platform: 'reddit',
+          itemType: 'comment',
+          parentId: this.bareId(comment.parent_id) ?? postId,
+          ...(comment.id ? { id: comment.id } : {}),
+          ...(comment.author ? { author: comment.author } : {}),
+          ...(comment.author_fullname ? { authorId: comment.author_fullname } : {}),
+          ...(comment.permalink ? { url: `https://www.reddit.com${comment.permalink}` } : {}),
+          metrics: { likes: comment.score ?? comment.ups ?? 0 },
+          raw: { subreddit: comment.subreddit, fullname: comment.name, linkId: comment.link_id },
+        });
+        if (depth < 3 && comment.replies && typeof comment.replies === 'object') {
+          visit(comment.replies, depth + 1);
+        }
+      }
+    };
+    visit(listing, 1);
+    return result;
+  }
+
+  private bareId(value: string | undefined): string | undefined {
+    return value?.replace(/^t[13]_/, '');
   }
 }

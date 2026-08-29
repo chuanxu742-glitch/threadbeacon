@@ -45,6 +45,7 @@ export type WebSocketFactory = (url: string) => WebSocket;
 
 export interface JetstreamProviderOptions extends BaseProviderDeps {
   readonly endpoint?: string;
+  readonly profileEndpoint?: string;
   readonly webSocketFactory?: WebSocketFactory;
 }
 
@@ -60,11 +61,14 @@ export class BlueskyJetstreamProvider extends BaseProvider {
   };
 
   private readonly endpoint: string;
+  private readonly profileEndpoint: string;
   private readonly makeSocket: WebSocketFactory;
+  private readonly handles = new Map<string, Promise<string | undefined>>();
 
   constructor(opts: JetstreamProviderOptions) {
     super(opts);
     this.endpoint = opts.endpoint ?? DEFAULT_ENDPOINT;
+    this.profileEndpoint = opts.profileEndpoint ?? 'https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile';
     this.makeSocket = opts.webSocketFactory ?? ((url) => new WebSocket(url));
   }
 
@@ -92,7 +96,7 @@ export class BlueskyJetstreamProvider extends BaseProvider {
 
       const timer = setTimeout(finish, query.maxDurationMs);
 
-      ws.onmessage = (ev: MessageEvent): void => {
+      ws.onmessage = (ev: MessageEvent): void => { void (async () => {
         const raw = typeof ev.data === 'string' ? ev.data : undefined;
         if (raw === undefined) return;
 
@@ -116,6 +120,7 @@ export class BlueskyJetstreamProvider extends BaseProvider {
         // 对应的网页链接是 bsky.app/profile/{did}/post/{rkey}
         const did = parsed.did;
         const rkey = commit.rkey;
+        const handle = did ? await this.resolveHandle(did) : undefined;
         const atUri = did && rkey ? `at://${did}/${POST_COLLECTION}/${rkey}` : undefined;
         // 回复的 parent 是 at:// uri，直接作为 parentId 关联回被回复的帖子
         const parent = record?.reply?.parent?.uri;
@@ -128,7 +133,8 @@ export class BlueskyJetstreamProvider extends BaseProvider {
           ...(rkey ? { id: rkey } : {}),
           ...(parent ? { parentId: parent } : {}),
           ...(did ? { authorId: did } : {}),
-          ...(did && rkey ? { url: `https://bsky.app/profile/${did}/post/${rkey}` } : {}),
+          ...(handle ? { author: handle } : {}),
+          ...(did && rkey ? { url: `https://bsky.app/profile/${handle ?? did}/post/${rkey}` } : {}),
           ...(record?.langs?.[0] !== undefined ? { lang: record.langs[0] } : {}),
           raw: {
             atUri,
@@ -141,12 +147,29 @@ export class BlueskyJetstreamProvider extends BaseProvider {
           },
         });
         if (collected.length >= query.limit) finish();
-      };
+      })(); };
 
       ws.onerror = finish;
       ws.onclose = finish;
     });
 
     return this.bundle(collected, 'streamLive');
+  }
+
+  private resolveHandle(did: string): Promise<string | undefined> {
+    const cached = this.handles.get(did);
+    if (cached) return cached;
+    const lookup = (async () => {
+      try {
+        const url = new URL(this.profileEndpoint);
+        url.searchParams.set('actor', did);
+        const profile = await this.http.getJson<{ readonly handle?: string }>(url.toString());
+        return profile.handle?.trim() || undefined;
+      } catch {
+        return undefined;
+      }
+    })();
+    this.handles.set(did, lookup);
+    return lookup;
   }
 }

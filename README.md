@@ -362,8 +362,8 @@ git clone https://github.com/liangdabiao/SeekMoney-ai reference/SeekMoney-ai
   并补了 `DataCleaner.clean()` 的 `indices` 返回 —— 清洗会过滤与去重，
   没有这个映射就无法把簇成员关联回原始记录
 - LLM 接入层：url/key/model 三项配置，OpenAI 兼容与 Anthropic Messages 双线路
-- 七个 provider：Bluesky Jetstream（实时流，零凭据）、Bluesky 检索（需凭据，当前不可用）、
-  Reddit（官方 API + OAuth）、YouTube（Data API v3，含评论），
+- 七个 provider：Bluesky Jetstream（实时流、DID→handle 丰富、零凭据）、Bluesky 检索（需凭据，当前不可用）、
+  Reddit（官方 API + OAuth，含评论树）、YouTube（Data API v3，含评论），
   以及经 TikHub 接入的小红书 / 抖音 / TikTok（均含评论）
 - 编排层：按模式自动选路，provider → 聚类 → LLM 有界并发归纳 → 洞察与原始数据一并落盘，
   并记录成功/跳过的簇数，避免部分结果被误当成完整结果
@@ -378,20 +378,17 @@ git clone https://github.com/liangdabiao/SeekMoney-ai reference/SeekMoney-ai
 **下一步**
 1. 拿真实凭据验证四条 TikHub 链路与 Reddit / YouTube（`pnpm smoke:reddit`）
 2. 用自有浏览器登录态验证 Bilibili、知乎、微博、X、LinkedIn 等 OpenCLI 浏览器适配器
-3. Reddit 评论抓取 —— 当前 `canFetchComments: false`，只取帖子
-4. Jetstream 的 `author` 只有 DID，没有 handle；要显示名需再调
-   `app.bsky.actor.getProfile` 补齐
-5. `fetchOwned` 模式的 creator API provider
-6. 为 `linux/amd64` / `linux/arm64` 增加真实 Docker Buildx 启动矩阵与恢复演练
-7. 为 PostgreSQL/MinIO 增加自动备份、恢复演练和控制平面多副本滚动升级
-8. Dify code/tool/plugin 的独立强沙箱；在沙箱完成前继续阻断任意代码执行，不以兼容名义降低安全边界
+3. `fetchOwned` 模式的 creator API provider
+4. 为 `linux/amd64` / `linux/arm64` 增加真实 Docker Buildx 启动矩阵与恢复演练
+5. 为 PostgreSQL/MinIO 增加自动备份、恢复演练和控制平面多副本滚动升级
+6. Dify code/tool/plugin 的独立强沙箱；在沙箱完成前继续阻断任意代码执行，不以兼容名义降低安全边界
 
 ## 平台覆盖
 
 | 平台 | 路径 | 评论 | 状态 |
 |---|---|---|---|
 | Bluesky | AT Protocol Jetstream | 回复 | ✅ 真实网络验证过，零凭据；只有实时增量，无历史 |
-| Reddit | 官方 Data API | ❌ | ⚠️ 未用真实凭据验证。免费档仅限非商业 |
+| Reddit | 官方 Data API | ✅ | ⚠️ 帖子与评论树已有测试；未用真实凭据验证。免费档仅限非商业 |
 | YouTube | Data API v3 | ✅ | ⚠️ 未用真实凭据验证。search 约 100 次/天 |
 | **小红书** | **Spider_XHS**（自有账号登录态） | ✅ | ⚠️ 代码完整，未用真实账号跑通 |
 | 小红书 | TikHub | ✅ | ⚠️ 未用真实 key 验证 |

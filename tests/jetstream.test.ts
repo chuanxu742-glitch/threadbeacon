@@ -180,4 +180,34 @@ describe('BlueskyJetstreamProvider', () => {
     const bundle = await p.streamLive({ keyword: 'battery', limit: 10, maxDurationMs: 5000 });
     expect(bundle.items).toHaveLength(1);
   });
+
+  it('把 DID 丰富为 handle，并缓存同一作者的查询', async () => {
+    const calls: string[] = [];
+    const http: HttpPort = {
+      authMode: 'anonymous',
+      async getJson<T>(url: string): Promise<T> {
+        calls.push(url);
+        return { handle: 'alice.bsky.social' } as T;
+      },
+      async postForm<T>(): Promise<T> { throw new Error('不应被调用'); },
+    };
+    const socket = new FakeSocket();
+    const p = new BlueskyJetstreamProvider({ http, webSocketFactory: () => socket as unknown as WebSocket });
+    queueMicrotask(() => {
+      for (const [rkey, text] of [['one', 'battery one'], ['two', 'battery two']]) {
+        socket.push({ kind: 'commit', did: 'did:plc:alice', commit: {
+          operation: 'create', collection: 'app.bsky.feed.post', rkey,
+          record: { text, createdAt: '2026-08-05T13:47:22Z' },
+        } });
+      }
+    });
+
+    const bundle = await p.streamLive({ keyword: 'battery', limit: 2, maxDurationMs: 2000 });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain('actor=did%3Aplc%3Aalice');
+    expect(bundle.items.every((item) => item.author === 'alice.bsky.social')).toBe(true);
+    expect(bundle.items[0]?.authorId).toBe('did:plc:alice');
+    expect(bundle.items[0]?.url).toBe('https://bsky.app/profile/alice.bsky.social/post/one');
+  });
 });
