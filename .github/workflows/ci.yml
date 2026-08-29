@@ -57,7 +57,9 @@ jobs:
           corepack prepare pnpm@10.13.1 --activate
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir apps/control-plane install --frozen-lockfile
 
       - name: Verify
         run: pnpm check
