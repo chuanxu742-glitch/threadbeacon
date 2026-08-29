@@ -1,0 +1,143 @@
+{{- if ne (int .Values.gateway.replicaCount) 1 }}
+{{- fail "gateway.replicaCount must remain 1 until the shared Agent directory/dispatch router is enabled" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "threadbeacon-execution.fullname" . }}-gateway
+  labels:
+    {{- include "threadbeacon-execution.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  replicas: {{ .Values.gateway.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "threadbeacon-execution.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "threadbeacon-execution.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: gateway
+      annotations:
+        {{- toYaml .Values.podAnnotations | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: gateway
+          image: "{{ .Values.gateway.image.repository }}:{{ .Values.gateway.image.tag }}"
+          imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
+          env:
+            - name: THREADBEACON_GATEWAY_LISTEN
+              value: "0.0.0.0:{{ .Values.gateway.listenPort }}"
+            - name: THREADBEACON_GATEWAY_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: THREADBEACON_GATEWAY_NODE_NAME
+              value: {{ printf "%s-gateway" (include "threadbeacon-execution.fullname" .) | quote }}
+            - name: THREADBEACON_GATEWAY_PUBLIC_URL
+              value: {{ required "gateway.publicUrl is required and must be an HTTPS URL reachable by the control plane" .Values.gateway.publicUrl | quote }}
+            - name: THREADBEACON_GATEWAY_STATE_FILE
+              value: /data/gateway-state.json
+            - name: THREADBEACON_CONTROL_URL
+              value: {{ required "controlPlane.url is required" .Values.controlPlane.url | quote }}
+            - name: THREADBEACON_GATEWAY_DISPATCH_TIMEOUT_MS
+              value: {{ .Values.gateway.dispatchTimeoutMs | quote }}
+            - name: THREADBEACON_GATEWAY_AGENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "threadbeacon-execution.secretName" . }}
+                  key: {{ .Values.gateway.agentTokenSecretKey }}
+            - name: THREADBEACON_GATEWAY_CONTROL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "threadbeacon-execution.secretName" . }}
+                  key: {{ .Values.gateway.controlTokenSecretKey }}
+            - name: THREADBEACON_NODE_REGISTRATION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "threadbeacon-execution.controlSecretName" . }}
+                  key: {{ .Values.controlPlane.registrationKeySecretKey }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.gateway.listenPort }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 12
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: state
+              mountPath: /data
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 32Mi
+        - name: state
+          emptyDir:
+            sizeLimit: 16Mi
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "threadbeacon-execution.fullname" . }}-gateway
+  labels:
+    {{- include "threadbeacon-execution.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.gateway.service.type }}
+  selector:
+    app.kubernetes.io/name: {{ include "threadbeacon-execution.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: gateway
+  ports:
+    - name: http
+      port: {{ .Values.gateway.service.port }}
+      targetPort: http

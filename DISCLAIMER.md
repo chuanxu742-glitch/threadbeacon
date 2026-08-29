@@ -3,8 +3,8 @@
 > **English summary:** This project collects **publicly visible** social data only
 > and contains no signature-reversing code of its own. It **does** retain raw
 > content and identifiers (author, permalink, timestamps) and exports them, and
-> one optional provider (Xiaohongshu) uses a **logged-in session of the operator's
-> own account** via an external third-party tool. Publishing this code is **not** a
+> optional external providers (OpenCLI and Spider_XHS) may use a **logged-in session
+> of the operator's own account**. Publishing this code is **not** a
 > claim that operating it is lawful in your jurisdiction. Compliance obligations
 > (GDPR Art. 6/14/27, PIPL, platform Terms of Service) attach to **whoever runs
 > it**, not to the code. Read the sections below before deploying.
@@ -13,7 +13,7 @@
 
 ## 1. 凭据边界
 
-### caiji 自身发出的请求：不带用户会话凭据
+### ThreadBeacon 自身发出的请求：不带用户会话凭据
 
 `PoliteHttpClient` 在**任何** `AuthMode` 下都拒发 `Cookie` / `Set-Cookie` /
 `X-CSRF-Token`，命中即抛 `SessionCredentialError`。这一条没有开关，只能改源码。
@@ -24,27 +24,28 @@
 > `app-credential` 指平台签发给应用的凭据（Reddit OAuth、YouTube API key），
 > 官方 API 是**最合规**的取数路径，与登录态采集性质完全不同。
 
-### 但有一个 provider 通过外部工具使用登录态
+### 外部 provider 可能使用登录态
 
 ⚠️ **这是本项目最需要主动了解的一条，不要跳过。**
 
-`SpiderXhsProvider`（小红书）不走 caiji 的 HTTP 层，而是以子进程调用使用者
-自行安装的第三方工具 [Spider_XHS](https://github.com/cv-cat/Spider_XHS)，
-后者用**运行者自有账号扫码登录**后的会话凭据取数。
+`SpiderXhsProvider` 与 `OpenCliProvider` 不走 ThreadBeacon 的 HTTP 层，而是调用独立第三方
+进程。Spider_XHS 用于小红书；OpenCLI 可复用已登录浏览器并动态提供多站点只读命令。
+两者都可能使用**运行者自有账号**的会话凭据取数。
 
 | | 说明 |
 |---|---|
-| 启用方式 | 仅当配置了 `SPIDER_XHS_PATH` 时才注册；默认不启用 |
+| 启用方式 | Spider_XHS 需配置路径；OpenCLI 随 Worker 安装并在启动时动态发现 |
 | 凭据归属 | 运行者本人的真实账号，非虚假账号、非他人账号 |
 | provenance | 如实记为 `kind='user-authorized'`、`auth='user-session'`，可与官方 API 数据区分 |
-| 第三方代码 | **不随本项目分发**（Spider_XHS 无 LICENSE 文件，按全版权保留处理） |
-| 上游声明 | Spider_XHS README：「仅供学习交流使用，禁止任何商业化行为」 |
+| 第三方代码 | OpenCLI 以 npm 依赖分发；Spider_XHS 不随项目分发 |
+| 写操作 | OpenCLI 分析入口拒绝写命令、下载、敏感字段和输出路径；只执行目录中声明为 read 的命令 |
 
 **风险定性**：与 Voyager Labs 案的区别在于账号归属（真实自有 vs 虚假账号），
 但也**不等同于** Bright Data 案的「登出抓公开数据」。它落在两者之间，
 不存在可直接援引的有利先例。启用它的人自行承担该风险。
 
-不想要这条路径，就不要配 `SPIDER_XHS_PATH`——其余 provider 一概不使用登录态。
+不想使用登录态，就不要配置 Spider_XHS，也不要给 OpenCLI 连接已登录的浏览器；
+OpenCLI 中标记为 public 的只读适配器仍可匿名运行。
 
 ### 无签名逆向
 
@@ -107,15 +108,16 @@
 > "unofficial API"。这类不实陈述在对外交付时可能构成对客户的虚假陈述，
 > 风险高于技术问题本身。详见 `docs/技术选型调研.md` 第 15 节。
 
-## 5. 已知不支持的平台
+## 5. 技术接入不等于合规通道
 
-以下平台经调研确认**没有可用的合规内容接口**，本项目不提供、也不接受相关
-逆向实现（详见 `docs/行业合规范式.md` 第 5 节）：
+以下平台经调研确认**没有普遍可用的合规商业内容接口**。OpenCLI 外部适配器可能
+提供技术读取能力，但这不改变其授权与条款状态，本项目也不接受相关签名逆向实现
+（详见 `docs/行业合规范式.md` 第 5 节）：
 
 小红书、微信视频号、B 站、快手（全站搜索）；Meta / Instagram 全网公开内容；
 TikTok（需先取得 Marketing Partner 资格）。
 
-若你的场景需要这些数据，合规路径是官方付费数据产品、用户授权的自有账号数据，
+若你的场景需要这些数据，优先路径仍是官方付费数据产品、用户授权的自有账号数据，
 或有实体、可签合同的持牌第三方数据供应商。
 
 ## 6. 无担保

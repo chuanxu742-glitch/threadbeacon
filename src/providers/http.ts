@@ -11,13 +11,15 @@
 //
 // 因此凭据策略按 AuthMode 分档，而不是一刀切。
 
+import { setTimeout as delay } from 'node:timers/promises';
+
 /**
  * 取数时使用的凭据档位。
  *
  * 注意 'user-session' 是**声明**用的，不是放行开关：
  * PoliteHttpClient 在任何档位下都拒发 Cookie，这条没有改变。
  * 该档位只出现在 provenance 里，用于如实标记「这批数据来自使用了登录态的
- * 外部工具」（见 providers/external.ts）—— 审计时必须能把它与官方 API
+ * 外部工具」—— 审计时必须能把它与官方 API
  * 采到的数据区分开，含糊记录比不记录更糟。
  */
 export type AuthMode =
@@ -64,8 +66,36 @@ export class RateLimitedError extends Error {
     readonly status: number,
     readonly host: string,
   ) {
-    super(`${host} 返回 ${status}，已触发熔断。不得通过并发或换 IP 绕过限流。`);
+    super(`${host} 返回 ${status}，重试次数已耗尽。不得通过并发或换 IP 绕过限流。`);
     this.name = 'RateLimitedError';
+  }
+}
+
+export class TransientHttpError extends Error {
+  constructor(
+    readonly status: number | undefined,
+    readonly method: string,
+    readonly url: string,
+    options: ErrorOptions = {},
+  ) {
+    super(
+      status === undefined
+        ? `${method} ${url} 网络请求失败，重试次数已耗尽。`
+        : `${method} ${url} 返回暂时性 HTTP ${status}，重试次数已耗尽。`,
+      options,
+    );
+    this.name = 'TransientHttpError';
+  }
+}
+
+export class HttpStatusError extends Error {
+  constructor(
+    readonly status: number,
+    readonly method: string,
+    readonly url: string,
+  ) {
+    super(`${method} ${url} 失败：HTTP ${status}`);
+    this.name = 'HttpStatusError';
   }
 }
 
@@ -97,7 +127,7 @@ export interface HttpOptions {
   readonly authMode?: AuthMode;
   /** 同一 host 两次请求之间的最小间隔（毫秒）。默认 1000，即 ≤1 QPS/host。 */
   readonly minIntervalMs?: number;
-  /** 遇 429 后的最大重试次数。默认 3。403 不重试。 */
+  /** 遇 429、暂时性 5xx 或网络错误后的最大重试次数。默认 3。403 不重试。 */
   readonly maxRetries?: number;
   /** 退避基数（毫秒）。默认 2000。 */
   readonly backoffBaseMs?: number;
@@ -112,7 +142,47 @@ export interface HttpOptions {
 
 // 代理不在这一层处理 —— 它是进程级配置，见 src/net/proxy.ts。
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+/** 常见网关与上游暂时性错误。与业务型 4xx 分开，后者重试没有意义。 */
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504, 520, 522, 524]);
+
+/** URL 可能含 YouTube key / access_token；错误日志绝不能把它们原样打印出来。 */
+export function redactUrl(raw: string): string {
+  try {
+    const url = new URL(raw);
+    for (const key of url.searchParams.keys()) {
+      if (/(?:key|token|secret|password|credential|authorization)/i.test(key)) {
+        url.searchParams.set(key, '[REDACTED]');
+      }
+    }
+    return url.toString();
+  } catch {
+    return '<invalid-url>';
+  }
+}
+
+/** 同时支持 Retry-After 的秒数与 HTTP-date 两种标准格式。 */
+export function retryAfterMs(value: string | null, nowMs: number = Date.now()): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const at = Date.parse(value);
+  if (!Number.isFinite(at)) return undefined;
+  return Math.max(0, at - nowMs);
+}
+
+function nonNegativeInteger(name: string, value: number): number {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new RangeError(`${name} 必须是非负整数，收到 ${value}`);
+  }
+  return value;
+}
+
+function positiveNumber(name: string, value: number): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new RangeError(`${name} 必须是正数，收到 ${value}`);
+  }
+  return value;
+}
 
 /**
  * 全局按 host 串行化的限流器。
@@ -133,7 +203,7 @@ export class PolitePool {
       const last = this.lastAt.get(host);
       if (last !== undefined) {
         const wait = this.minIntervalMs - (Date.now() - last);
-        if (wait > 0) await sleep(wait);
+        if (wait > 0) await delay(wait);
       }
       this.lastAt.set(host, Date.now());
       return fn();
@@ -168,10 +238,11 @@ export class PoliteHttpClient implements HttpPort {
 
   constructor(opts: HttpOptions = {}) {
     this.authMode = opts.authMode ?? 'anonymous';
-    this.pool = new PolitePool(opts.minIntervalMs ?? 1000);
-    this.maxRetries = opts.maxRetries ?? 3;
-    this.backoffBaseMs = opts.backoffBaseMs ?? 2000;
-    this.timeoutMs = opts.timeoutMs ?? 30_000;
+    const minIntervalMs = nonNegativeInteger('minIntervalMs', opts.minIntervalMs ?? 1000);
+    this.pool = new PolitePool(minIntervalMs);
+    this.maxRetries = nonNegativeInteger('maxRetries', opts.maxRetries ?? 3);
+    this.backoffBaseMs = nonNegativeInteger('backoffBaseMs', opts.backoffBaseMs ?? 2000);
+    this.timeoutMs = positiveNumber('timeoutMs', opts.timeoutMs ?? 30_000);
   }
 
   private send(url: string, init: RequestInit): Promise<Response> {
@@ -200,26 +271,9 @@ export class PoliteHttpClient implements HttpPort {
 
   async getJson<T>(url: string, headers: Record<string, string> = {}): Promise<T> {
     this.assertHeadersAllowed(headers);
-    const host = new URL(url).host;
-
-    for (let attempt = 0; ; attempt++) {
-      const res = await this.pool.schedule(host, () =>
-        this.send(url, { headers: { ...headers, accept: 'application/json' } }),
-      );
-
-      // 403 不重试：它是「被拒绝」而非「太快了」，重试同一个请求不会变成 200
-      if (res.status === 403) throw new ForbiddenError(host, url);
-
-      if (res.status === 429 || res.status === 503) {
-        if (attempt >= this.maxRetries) throw new RateLimitedError(res.status, host);
-        await sleep(this.backoffBaseMs * 2 ** attempt);
-        continue;
-      }
-      if (!res.ok) {
-        throw new Error(`GET ${url} 失败：HTTP ${res.status}`);
-      }
-      return (await res.json()) as T;
-    }
+    return this.requestJson<T>('GET', url, {
+      headers: { ...headers, accept: 'application/json' },
+    });
   }
 
   /** 表单 POST，仅用于 OAuth token 交换这类场景。 */
@@ -229,27 +283,57 @@ export class PoliteHttpClient implements HttpPort {
     headers: Record<string, string> = {},
   ): Promise<T> {
     this.assertHeadersAllowed(headers);
-    const host = new URL(url).host;
+    return this.requestJson<T>('POST', url, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'content-type': 'application/x-www-form-urlencoded',
+        accept: 'application/json',
+      },
+      body: new URLSearchParams(body).toString(),
+    });
+  }
 
-    const res = await this.pool.schedule(host, () =>
-      this.send(url, {
-        method: 'POST',
-        headers: {
-          ...headers,
-          'content-type': 'application/x-www-form-urlencoded',
-          accept: 'application/json',
-        },
-        body: new URLSearchParams(body).toString(),
-      }),
-    );
+  private async requestJson<T>(method: string, url: string, init: RequestInit): Promise<T> {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new TypeError(`只支持 HTTP(S) URL，收到 ${parsed.protocol}`);
+    }
+    const host = parsed.host;
+    const safeUrl = redactUrl(url);
 
-    if (res.status === 403) throw new ForbiddenError(host, url);
-    if (res.status === 429 || res.status === 503) {
-      throw new RateLimitedError(res.status, host);
+    for (let attempt = 0; ; attempt++) {
+      let res: Response;
+      try {
+        res = await this.pool.schedule(host, () => this.send(url, init));
+      } catch (cause) {
+        if (attempt >= this.maxRetries) {
+          throw new TransientHttpError(undefined, method, safeUrl, { cause });
+        }
+        await delay(this.backoffDelay(attempt));
+        continue;
+      }
+
+      // 403 不重试：它是「被拒绝」而非「太快了」，重试同一个请求不会变成 200
+      if (res.status === 403) throw new ForbiddenError(host, safeUrl);
+
+      if (RETRYABLE_STATUSES.has(res.status)) {
+        if (attempt >= this.maxRetries) {
+          if (res.status === 429) throw new RateLimitedError(res.status, host);
+          throw new TransientHttpError(res.status, method, safeUrl);
+        }
+        const retryAfter = retryAfterMs(res.headers.get('retry-after'));
+        await delay(retryAfter ?? this.backoffDelay(attempt));
+        continue;
+      }
+      if (!res.ok) throw new HttpStatusError(res.status, method, safeUrl);
+      return (await res.json()) as T;
     }
-    if (!res.ok) {
-      throw new Error(`POST ${url} 失败：HTTP ${res.status}`);
-    }
-    return (await res.json()) as T;
+  }
+
+  /** 指数退避加少量 jitter，避免多个进程在同一毫秒再次撞向上游。 */
+  private backoffDelay(attempt: number): number {
+    const base = this.backoffBaseMs * 2 ** attempt;
+    return base + Math.random() * Math.min(250, base * 0.25);
   }
 }

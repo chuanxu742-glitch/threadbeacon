@@ -277,12 +277,18 @@ describe('llmConfigFromEnv', () => {
       LLM_MODEL: 'glm-4.6',
       LLM_BASE_URL: 'https://open.bigmodel.cn/api/paas/v4',
       LLM_MAX_TOKENS: '2048',
+      LLM_TIMEOUT_MS: '30000',
+      LLM_TEMPERATURE: '0.2',
+      LLM_THINKING: 'off',
     });
     expect(cfg).toEqual({
       apiKey: 'k',
       model: 'glm-4.6',
       baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
       maxTokens: 2048,
+      timeoutMs: 30000,
+      temperature: 0.2,
+      thinking: 'off',
     });
   });
 
@@ -295,5 +301,23 @@ describe('llmConfigFromEnv', () => {
     expect(() =>
       llmConfigFromEnv({ LLM_API_KEY: 'k', LLM_MODEL: 'm', LLM_FORMAT: 'gemini' }),
     ).toThrow(/openai \| anthropic/);
+  });
+
+  it('在 SDK 构造前拒绝非法数字与 URL', () => {
+    const base = { LLM_API_KEY: 'k', LLM_MODEL: 'm' };
+    expect(() => llmConfigFromEnv({ ...base, LLM_MAX_TOKENS: 'abc' })).toThrow(
+      /LLM_MAX_TOKENS/,
+    );
+    expect(() => llmConfigFromEnv({ ...base, LLM_TIMEOUT_MS: '0' })).toThrow(/LLM_TIMEOUT_MS/);
+    expect(() => llmConfigFromEnv({ ...base, LLM_TEMPERATURE: '3' })).toThrow(/LLM_TEMPERATURE/);
+    expect(() => llmConfigFromEnv({ ...base, LLM_BASE_URL: 'file:///tmp/model' })).toThrow(
+      /http\/https/,
+    );
+  });
+
+  it('createLlmClient 同样校验直接传入的配置', () => {
+    expect(() => createLlmClient({ apiKey: ' ', model: 'm' })).toThrow(/apiKey/);
+    expect(() => createLlmClient({ apiKey: 'k', model: 'm', maxTokens: 0 })).toThrow(/maxTokens/);
+    expect(() => createLlmClient({ apiKey: 'k', model: 'm', timeoutMs: -1 })).toThrow(/timeoutMs/);
   });
 });

@@ -1,0 +1,52 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "threadbeacon-execution.fullname" . }}-gateway
+  labels:
+    {{- include "threadbeacon-execution.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "threadbeacon-execution.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: gateway
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "threadbeacon-execution.name" . }}
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/component: agent
+      ports:
+        - protocol: TCP
+          port: {{ .Values.gateway.listenPort }}
+    {{- if .Values.gateway.ingress.enabled }}
+    - ports:
+        - protocol: TCP
+          port: {{ .Values.gateway.listenPort }}
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "threadbeacon-execution.fullname" . }}-browser
+  labels:
+    {{- include "threadbeacon-execution.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "threadbeacon-execution.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: agent
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.operatorSelector | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 6080
+{{- end }}

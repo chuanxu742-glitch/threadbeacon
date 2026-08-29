@@ -14,6 +14,7 @@
 // ---------------------------------------------------------------------------
 
 import OpenAI from 'openai';
+import { setTimeout as delay } from 'node:timers/promises';
 
 // ==================== 类型定义 ====================
 
@@ -46,14 +47,6 @@ export interface EmbeddingProviderConfig {
     maxRetries?: number;
   };
 
-  // 通用配置
-  batchSize?: number;
-  timeout?: number;
-  maxRetries?: number;
-
-  // 降级策略
-  fallbackProvider?: EmbeddingProviderType;
-  enableFallback?: boolean;
 }
 
 /**
@@ -283,7 +276,6 @@ export class ZhipuAIEmbeddingProvider implements IEmbeddingProvider {
   private baseURL: string;
   private model: string;
   private dimension: number;
-  private batchSize: number;
   private rateLimitDelay: number;
   private stats: ProviderStats;
 
@@ -292,7 +284,6 @@ export class ZhipuAIEmbeddingProvider implements IEmbeddingProvider {
     this.baseURL = config.baseURL || 'https://open.bigmodel.cn/api/paas/v4/embeddings';
     this.model = config.model || 'embedding-3';
     this.dimension = 1024; // 智谱AI embedding 维度
-    this.batchSize = 1; // 智谱AI API 只支持单条请求
     this.rateLimitDelay = 500; // 0.5 秒延迟
 
     this.stats = {
@@ -369,7 +360,7 @@ export class ZhipuAIEmbeddingProvider implements IEmbeddingProvider {
 
         // 限流延迟 (除了最后一个请求)
         if (i < texts.length - 1) {
-          await this.delay(this.rateLimitDelay);
+          await delay(this.rateLimitDelay);
         }
       }
 
@@ -413,9 +404,6 @@ export class ZhipuAIEmbeddingProvider implements IEmbeddingProvider {
     return { ...this.stats };
   }
 
-  private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
 }
 
 // ==================== 自动/智能提供商 ====================
@@ -510,17 +498,6 @@ export class AutoEmbeddingProvider implements IEmbeddingProvider {
     return this.currentProvider.getStats();
   }
 
-  /**
-   * 获取所有提供商的统计信息
-   */
-  getAllStats(): ProviderStats[] {
-    const stats: ProviderStats[] = [];
-    const entries = Array.from(this.providers.values());
-    for (const provider of entries) {
-      stats.push(provider.getStats());
-    }
-    return stats;
-  }
 }
 
 // ==================== 工厂函数 ====================
@@ -572,52 +549,6 @@ export function createConfigFromEnv(): EmbeddingProviderConfig {
       apiKey: process.env.GLM_API_KEY || '',
       model: (process.env.GLM_EMBEDDING_MODEL as any) || 'embedding-3',
       baseURL: process.env.GLM_BASE_EMBEDDING_URL
-    },
-    batchSize: 100,
-    timeout: 30000,
-    maxRetries: 2,
-    enableFallback: true
-  };
-}
-
-/**
- * 获取提供商对比信息
- */
-export function getProviderComparison() {
-  return {
-    openai: {
-      name: 'OpenAI',
-      models: {
-        'text-embedding-3-small': {
-          dimension: 512,
-          cost: 0.10, // ¥ / 1M tokens
-          speed: '50-100ms',
-          batchSize: 100
-        },
-        'text-embedding-3-large': {
-          dimension: 3072,
-          cost: 0.65,
-          speed: '50-100ms',
-          batchSize: 100
-        }
-      }
-    },
-    zhipuai: {
-      name: 'ZhipuAI (智谱)',
-      models: {
-        'embedding-2': {
-          dimension: 1024,
-          cost: 0.50,
-          speed: '200-500ms',
-          batchSize: 1
-        },
-        'embedding-3': {
-          dimension: 1024,
-          cost: 0.50,
-          speed: '200-500ms',
-          batchSize: 1
-        }
-      }
     }
   };
 }

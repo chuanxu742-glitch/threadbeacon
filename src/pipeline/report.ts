@@ -38,6 +38,10 @@ export interface AnalysisStats {
   readonly clusteredTexts: number;
   readonly clusterCount: number;
   readonly noiseCount: number;
+  /** 成功产出洞察的簇数。 */
+  readonly summarizedClusters: number;
+  /** 因拒答、空响应或非法 JSON 未产出洞察的簇数。 */
+  readonly skippedClusters: number;
 }
 
 export interface AnalysisReport {

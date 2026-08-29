@@ -1,0 +1,11 @@
+ThreadBeacon execution cluster installed.
+
+Gateway service:
+  {{ include "threadbeacon-execution.fullname" . }}-gateway:{{ .Values.gateway.service.port }}
+
+Agents connect outbound over WebSocket and each owns a persistent Chromium profile.
+The chart deliberately does not deploy a second control-plane database: set
+controlPlane.url to the existing private Sites or self-hosted ThreadBeacon control plane.
+
+To reach one noVNC session without publishing it:
+  kubectl -n {{ .Release.Namespace }} port-forward pod/{{ include "threadbeacon-execution.fullname" . }}-agent-0 6080:6080

@@ -1,0 +1,63 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - codex/**
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    name: Typecheck and tests
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: threadbeacon_test
+          POSTGRES_USER: threadbeacon
+          POSTGRES_PASSWORD: threadbeacon-test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U threadbeacon -d threadbeacon_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL_PG: jdbc:postgresql://127.0.0.1:5432/threadbeacon_test
+      TEST_DATABASE_USER_PG: threadbeacon
+      TEST_DATABASE_PASSWORD_PG: threadbeacon-test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+          cache-dependency-path: apps/control-api/pom.xml
+
+      - name: Setup pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.13.1 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify
+        run: pnpm check

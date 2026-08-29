@@ -1,0 +1,91 @@
+nameOverride: ""
+fullnameOverride: ""
+
+controlPlane:
+  # Required. The private ThreadBeacon control-plane URL reachable from the cluster.
+  url: ""
+  existingSecret: ""
+  registrationKeySecretKey: node-registration-key
+
+gateway:
+  replicaCount: 1
+  # Required HTTPS address reachable by the external control plane.
+  publicUrl: ""
+  image:
+    repository: threadbeacon-gateway
+    tag: latest
+    pullPolicy: IfNotPresent
+  listenPort: 8789
+  dispatchTimeoutMs: 120000
+  existingSecret: ""
+  agentTokenSecretKey: gateway-agent-token
+  controlTokenSecretKey: gateway-control-token
+  service:
+    type: ClusterIP
+    port: 8789
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    host: gateway.example.com
+    tlsSecretName: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+agents:
+  replicas: 2
+  image:
+    repository: threadbeacon-worker
+    tag: latest
+    pullPolicy: IfNotPresent
+  concurrency: 2
+  extraEnv: []
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  persistence:
+    storageClass: ""
+    size: 1Gi
+
+browser:
+  image:
+    repository: threadbeacon-browser
+    tag: latest
+    pullPolicy: IfNotPresent
+  screenGeometry: 1440x900x24
+  extraArgs: ""
+  resources:
+    requests:
+      cpu: 500m
+      memory: 768Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  persistence:
+    storageClass: ""
+    size: 5Gi
+
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+
+networkPolicy:
+  enabled: true
+  # Restrict browser/noVNC access to Pods carrying this label.
+  operatorSelector:
+    threadbeacon.dev/browser-operator: "true"
+
+imagePullSecrets: []
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

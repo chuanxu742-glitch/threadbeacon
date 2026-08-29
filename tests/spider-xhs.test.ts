@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { SpiderXhsError, SpiderXhsProvider } from '../src/providers/xiaohongshu/spider-xhs.js';
-import { ExternalToolPort, ExternalToolTransportError } from '../src/providers/external.js';
 
 /** 记录调用参数的假桥接。按子命令路由。 */
 function fakeBridge(replies: Record<string, unknown>) {
@@ -193,18 +192,5 @@ describe('SpiderXhsProvider 错误处理', () => {
   it('checkAvailability 在桥接失败时返回 false 而不是抛错', async () => {
     const { p } = provider({ search: { ok: false, message: '未登录', data: null } });
     expect(await p.checkAvailability()).toBe(false);
-  });
-});
-
-describe('ExternalToolPort', () => {
-  it('默认档位是 user-session', () => {
-    expect(new ExternalToolPort().authMode).toBe('user-session');
-  });
-
-  it('被当成 HTTP 客户端用时立刻失败', async () => {
-    const port = new ExternalToolPort();
-    // 静默发出请求比报错糟糕得多：那会绕过限流与凭据校验
-    await expect(port.getJson()).rejects.toThrow(ExternalToolTransportError);
-    await expect(port.postForm()).rejects.toThrow(ExternalToolTransportError);
   });
 });

@@ -1,0 +1,186 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "threadbeacon-execution.fullname" . }}-agents
+  labels:
+    {{- include "threadbeacon-execution.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: false
+  selector:
+    app.kubernetes.io/name: {{ include "threadbeacon-execution.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: agent
+  ports:
+    - name: novnc
+      port: 6080
+      targetPort: novnc
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "threadbeacon-execution.fullname" . }}-agent
+  labels:
+    {{- include "threadbeacon-execution.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+spec:
+  serviceName: {{ include "threadbeacon-execution.fullname" . }}-agents
+  replicas: {{ .Values.agents.replicas }}
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "threadbeacon-execution.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "threadbeacon-execution.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: agent
+      annotations:
+        {{- toYaml .Values.podAnnotations | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 45
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: "{{ .Values.agents.image.repository }}:{{ .Values.agents.image.tag }}"
+          imagePullPolicy: {{ .Values.agents.image.pullPolicy }}
+          env:
+            - name: THREADBEACON_CONTROL_URL
+              value: {{ required "controlPlane.url is required" .Values.controlPlane.url | quote }}
+            - name: THREADBEACON_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: THREADBEACON_GATEWAY_AGENT_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: THREADBEACON_GATEWAY_WS_URL
+              value: "ws://{{ include "threadbeacon-execution.fullname" . }}-gateway:{{ .Values.gateway.service.port }}/agent"
+            - name: THREADBEACON_GATEWAY_ALLOW_INSECURE_WS
+              value: "1"
+            - name: THREADBEACON_GATEWAY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "threadbeacon-execution.secretName" . }}
+                  key: {{ .Values.gateway.agentTokenSecretKey }}
+            - name: THREADBEACON_NODE_REGISTRATION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "threadbeacon-execution.controlSecretName" . }}
+                  key: {{ .Values.controlPlane.registrationKeySecretKey }}
+            - name: THREADBEACON_WORKER_CONCURRENCY
+              value: {{ .Values.agents.concurrency | quote }}
+            - name: THREADBEACON_WORKER_STATE_FILE
+              value: /data/worker-state.json
+            - name: THREADBEACON_BROWSER_PROFILE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: OPENCLI_CDP_ENDPOINT
+              value: http://127.0.0.1:9222
+            {{- with .Values.agents.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.agents.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+          volumeMounts:
+            - name: worker-state
+              mountPath: /data
+        - name: browser
+          image: "{{ .Values.browser.image.repository }}:{{ .Values.browser.image.tag }}"
+          imagePullPolicy: {{ .Values.browser.image.pullPolicy }}
+          env:
+            - name: SCREEN_GEOMETRY
+              value: {{ .Values.browser.screenGeometry | quote }}
+            - name: CHROMIUM_EXTRA_ARGS
+              value: {{ .Values.browser.extraArgs | quote }}
+          ports:
+            - name: cdp
+              containerPort: 9222
+            - name: novnc
+              containerPort: 6080
+          startupProbe:
+            httpGet:
+              path: /json/version
+              port: cdp
+            failureThreshold: 18
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /json/version
+              port: cdp
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /json/version
+              port: cdp
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.browser.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: browser-profile
+              mountPath: /data/chromium
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: worker-state
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.agents.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.agents.persistence.size }}
+    - metadata:
+        name: browser-profile
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.browser.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.browser.persistence.size }}

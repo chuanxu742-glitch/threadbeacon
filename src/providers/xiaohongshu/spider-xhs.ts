@@ -2,17 +2,16 @@
 //
 // Spider_XHS (https://github.com/cv-cat/Spider_XHS) 无 LICENSE 文件，按全版权
 // 保留处理：其代码不进本仓库，由使用者自行 clone，本 provider 通过子进程调用
-// scripts/spider_xhs_bridge.py（caiji 原创）与之通信。
+// scripts/spider_xhs_bridge.py（threadbeacon 原创）与之通信。
 // 该项目 README 声明「仅供学习交流使用，禁止任何商业化行为」。
 //
 // 凭据：需要用自有账号扫码登录一次，cookie 落盘复用。因此 authMode 是
-// 'user-session' —— caiji 自己一个 Cookie 都不发，但 provenance 必须如实
+// 'user-session' —— threadbeacon 自己一个 Cookie 都不发，但 provenance 必须如实
 // 记录这批数据来自登录态，否则审计时无法与官方 API 的数据区分。
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { BaseProvider } from '../base.js';
-import { ExternalToolPort } from '../external.js';
 import type {
   ProviderCapability,
   RawObservation,
@@ -116,7 +115,7 @@ export class SpiderXhsProvider extends BaseProvider {
   private readonly runner: BridgeRunner;
 
   constructor(opts: SpiderXhsOptions) {
-    super({ http: new ExternalToolPort('user-session') });
+    super({ authMode: 'user-session' });
     this.opts = {
       spiderPath: opts.spiderPath,
       cookieFile: opts.cookieFile,

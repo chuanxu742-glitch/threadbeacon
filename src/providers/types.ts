@@ -7,17 +7,8 @@ import type { AuthMode } from './http.js';
 
 export type { AuthMode };
 
-/**
- * 目标平台。与「供应商」是两个独立维度，不要混进同一个枚举。
- *
- * ⛔ 不含 bilibili，这是刻意排除而非尚未实现：
- * 2026-01-28，B站委托律所向 SocialSisterYi/bilibili-API-collect（20k star，
- * 纯 API 文档、不含任何爬虫代码）发出停止侵害通知函，指控其系统性收集并
- * 公开传播非公开 API 的技术文档，维护者当即清空仓库。
- * 一个只写文档的项目尚且被点名，采集实现的风险不言自明。
- * 要重新加回来，请先确认该风险已消除，不要只因为「技术上做得到」就加。
- */
-export type Platform =
+/** 原生实现的平台。 */
+export type NativePlatform =
   | 'bluesky'
   | 'reddit'
   | 'youtube'
@@ -28,6 +19,35 @@ export type Platform =
   | 'xiaohongshu'
   | 'weibo'
   | 'kuaishou';
+
+/**
+ * 由 OpenCLI 动态发现的站点。使用前缀避免和原生 provider 的平台名冲突，
+ * 例如 `opencli:bilibili`、`opencli:zhihu`、`opencli:eastmoney`。
+ *
+ * 这条路径通过外部 OpenCLI 进程复用运行者自己的浏览器会话；它不把任何签名逆向、
+ * Cookie 或站点私有实现复制进 threadbeacon。登录态和站点条款风险仍会如实写入 provenance。
+ */
+export type OpenCliPlatform = `opencli:${string}`;
+
+/** 用户在控制台登记的通用只读数据源。 */
+export type GenericPlatform = 'rss' | 'rest' | 'web';
+
+/** 受控 GEO 能力；当前只发布版本化的公开官网观测。 */
+export type ManagedPlatform = 'geo';
+
+/** 目标平台。与「供应商」是两个独立维度，不要混进同一个枚举。 */
+export type Platform = NativePlatform | OpenCliPlatform | GenericPlatform | ManagedPlatform;
+
+export function openCliPlatform(site: string): OpenCliPlatform {
+  if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(site)) {
+    throw new RangeError(`非法 OpenCLI site：${site}`);
+  }
+  return `opencli:${site}`;
+}
+
+export function openCliSite(platform: Platform): string | undefined {
+  return platform.startsWith('opencli:') ? platform.slice('opencli:'.length) : undefined;
+}
 
 /**
  * 数据来源的性质。这决定合规定性，是审计时第一个被问的问题。

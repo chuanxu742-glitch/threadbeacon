@@ -10,6 +10,8 @@ export interface AnalyzeDeps {
   readonly registry: ProviderRegistry;
   readonly clustering: ClusteringService;
   readonly llm: ILlmClient;
+  /** 同时进行的簇归纳数。默认 4，避免串行慢，也避免无界并发打爆网关。 */
+  readonly summaryConcurrency?: number;
 }
 
 export interface AnalyzeRequest {
@@ -27,6 +29,53 @@ export interface AnalyzeRequest {
 }
 
 const DEFAULT_STREAM_MS = 60_000;
+export const DEFAULT_SUMMARY_CONCURRENCY = 4;
+
+export function summaryConcurrencyFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env['LLM_MAX_CONCURRENCY'];
+  if (raw === undefined || raw === '') return DEFAULT_SUMMARY_CONCURRENCY;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new RangeError(`LLM_MAX_CONCURRENCY 必须是正整数，收到 "${raw}"`);
+  }
+  return value;
+}
+
+function assertRequest(req: AnalyzeRequest): void {
+  if (!req.keyword.trim()) throw new RangeError('keyword 不能为空');
+  if (!Number.isInteger(req.limit) || req.limit <= 0) {
+    throw new RangeError(`limit 必须是正整数，收到 ${req.limit}`);
+  }
+  if (
+    req.maxDurationMs !== undefined &&
+    (!Number.isFinite(req.maxDurationMs) || req.maxDurationMs <= 0)
+  ) {
+    throw new RangeError(`maxDurationMs 必须是正数，收到 ${req.maxDurationMs}`);
+  }
+}
+
+async function mapConcurrent<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  if (!Number.isInteger(concurrency) || concurrency <= 0) {
+    throw new RangeError(`summaryConcurrency 必须是正整数，收到 ${concurrency}`);
+  }
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const index = next++;
+      if (index >= items.length) return;
+      results[index] = await fn(items[index]!);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, () => worker()),
+  );
+  return results;
+}
 
 /** 按模式取数。把「选哪条路」与「怎么分析」分开，编排逻辑才不会被模式差异污染。 */
 async function collect(deps: AnalyzeDeps, req: AnalyzeRequest): Promise<TextBundle> {
@@ -97,15 +146,21 @@ export async function analyze(
   deps: AnalyzeDeps,
   req: AnalyzeRequest,
 ): Promise<AnalysisReport> {
+  assertRequest(req);
+  const summaryConcurrency = deps.summaryConcurrency ?? DEFAULT_SUMMARY_CONCURRENCY;
+  if (!Number.isInteger(summaryConcurrency) || summaryConcurrency <= 0) {
+    throw new RangeError(`summaryConcurrency 必须是正整数，收到 ${summaryConcurrency}`);
+  }
   const bundle: TextBundle = await collect(deps, req);
   const texts = textsOf(bundle);
   const clustered = await deps.clustering.cluster(texts);
 
-  const painPoints: PainPoint[] = [];
-  for (const cluster of clustered.clusters) {
-    const analyzed = await summarize(deps.llm, cluster);
-    if (analyzed) painPoints.push(analyzed);
-  }
+  const summaries = await mapConcurrent(
+    clustered.clusters,
+    summaryConcurrency,
+    (cluster) => summarize(deps.llm, cluster),
+  );
+  const painPoints = summaries.filter((p): p is PainPoint => p !== undefined);
 
   painPoints.sort((a, b) => b.severity * b.size - a.severity * a.size);
 
@@ -118,6 +173,8 @@ export async function analyze(
       clusteredTexts: clustered.clusteredTexts,
       clusterCount: clustered.clusterCount,
       noiseCount: clustered.noiseCount,
+      summarizedClusters: painPoints.length,
+      skippedClusters: clustered.clusterCount - painPoints.length,
     },
     dataQuality: gradeQuality(clustered.clusteredTexts),
     keyword: req.keyword,

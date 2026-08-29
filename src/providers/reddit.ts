@@ -72,7 +72,7 @@ export class RedditProvider extends BaseProvider {
     super(opts);
     this.clientId = opts.clientId;
     this.clientSecret = opts.clientSecret;
-    this.userAgent = opts.userAgent ?? 'caiji/0.1 (https://github.com/)';
+    this.userAgent = opts.userAgent ?? 'threadbeacon/0.1 (https://github.com/)';
     this.capability = {
       id: 'reddit-official-api',
       platform: 'reddit',

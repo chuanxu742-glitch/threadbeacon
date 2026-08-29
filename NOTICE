@@ -1,5 +1,5 @@
-caiji
-Copyright 2026 caiji contributors
+ThreadBeacon
+Copyright 2026 threadbeacon contributors
 
 This product includes software developed by third parties, listed below.
 
@@ -48,3 +48,15 @@ Not taken from upstream: the data-collection layer (tikhub-client.ts and the
 eight platform service files). See docs/技术选型调研.md section 15 for the
 reasoning.
 ================================================================================
+
+opencli-Razormind
+https://github.com/2233admin/opencli-Razormind
+
+The Java Agent Skill governance design in apps/control-api is adapted from the
+Apache-2.0 licensed opencli-Razormind Skill subsystem as inspected at commit
+573af24867f51325bbd46af9320d8fcb34f6d5bb. ThreadBeacon reimplements the concepts in
+Java and PostgreSQL rather than copying the Python runtime. Adapted concepts
+include the nine-element Skill card, journey_trace_v1, conservative write-before-
+confirm policy, self-evaluation, failure-streak correction proposal, immutable
+version snapshots, and rollback. ThreadBeacon stores evidence in an append-only table
+to avoid concurrent JSON-array lost updates.

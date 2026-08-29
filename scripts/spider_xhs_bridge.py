@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # encoding: utf-8
-"""caiji <-> Spider_XHS 桥接层。
+"""threadbeacon <-> Spider_XHS 桥接层。
 
 Spider_XHS (https://github.com/cv-cat/Spider_XHS) 仓库**没有 LICENSE 文件**，
 按全版权保留处理：它的代码一行都不进本仓库，只在运行时 import。
 使用者需自行 clone 到本地，并用 SPIDER_XHS_PATH 指向该目录。
 其 README 声明「仅供学习交流使用，禁止任何商业化行为」——遵守它是使用者的责任。
 
-本文件是 caiji 原创的调用层，只做三件事：命令分发、调用、把结果转成统一 JSON。
+本文件是 threadbeacon 原创的调用层，只做三件事：命令分发、调用、把结果转成统一 JSON。
 
 用法（stdout 只输出一行 JSON，日志一律走 stderr）：
     python spider_xhs_bridge.py login   --cookie-file <path>
@@ -118,7 +118,7 @@ def cmd_comments(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="caiji <-> Spider_XHS 桥接")
+    p = argparse.ArgumentParser(description="threadbeacon <-> Spider_XHS 桥接")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     login = sub.add_parser("login", help="扫码登录并保存 cookie")

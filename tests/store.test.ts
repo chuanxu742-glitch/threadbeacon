@@ -8,7 +8,7 @@ import type { SourceItem } from '../src/providers/types.js';
 
 const dirs: string[] = [];
 async function tmp(): Promise<string> {
-  const d = await mkdtemp(join(tmpdir(), 'caiji-store-'));
+  const d = await mkdtemp(join(tmpdir(), 'threadbeacon-store-'));
   dirs.push(d);
   return d;
 }
@@ -67,7 +67,14 @@ const report: AnalysisReport = {
     robots: 'not-applicable',
     auth: 'anonymous',
   },
-  stats: { totalTexts: 2, clusteredTexts: 2, clusterCount: 1, noiseCount: 0 },
+  stats: {
+    totalTexts: 2,
+    clusteredTexts: 2,
+    clusterCount: 1,
+    noiseCount: 0,
+    summarizedClusters: 1,
+    skippedClusters: 0,
+  },
   dataQuality: 'exploratory',
   keyword: '续航',
   generatedAt: '2026-08-05T12:34:56.789Z',
@@ -163,6 +170,6 @@ describe('listReports', () => {
   });
 
   it('目录不存在时返回空数组而不是抛错', async () => {
-    expect(await listReports(join(tmpdir(), 'caiji-does-not-exist-xyz'))).toEqual([]);
+    expect(await listReports(join(tmpdir(), 'threadbeacon-does-not-exist-xyz'))).toEqual([]);
   });
 });

@@ -4,7 +4,7 @@
 // 打包一律走 bundle()，provenance 由基类填，不让子类自报。
 
 import { buildSourceItems } from './item.js';
-import type { HttpPort } from './http.js';
+import type { AuthMode, HttpPort } from './http.js';
 import type {
   AcquisitionMode,
   IDataProvider,
@@ -18,13 +18,24 @@ export interface BaseProviderDeps {
   readonly http: HttpPort;
 }
 
+export interface ExternalProviderDeps {
+  readonly authMode: AuthMode;
+}
+
 export abstract class BaseProvider implements IDataProvider {
   abstract readonly capability: ProviderCapability;
 
-  protected readonly http: HttpPort;
+  private readonly transport?: HttpPort;
+  private readonly authMode: AuthMode;
 
-  constructor(deps: BaseProviderDeps) {
-    this.http = deps.http;
+  constructor(deps: BaseProviderDeps | ExternalProviderDeps) {
+    this.transport = 'http' in deps ? deps.http : undefined;
+    this.authMode = 'http' in deps ? deps.http.authMode : deps.authMode;
+  }
+
+  protected get http(): HttpPort {
+    if (!this.transport) throw new Error('该 provider 没有 HTTP transport');
+    return this.transport;
   }
 
   /**
@@ -48,7 +59,7 @@ export abstract class BaseProvider implements IDataProvider {
       // 取自 capability 而非写死 —— 之前这里硬编码 true，等于在审计记录里
       // 声明了一件从未发生的事（代码库里根本没有 robots 检查逻辑）
       robots: this.capability.robots,
-      auth: this.http.authMode,
+      auth: this.authMode,
     };
     return { items, provenance };
   }

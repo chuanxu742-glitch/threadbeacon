@@ -1,7 +1,7 @@
 // TikHub 接入的统一出口。
 //
 // 一个 token 打通三个平台，注册进 registry 后 analyze 就能按 platform 选路。
-// B站已从本项目排除，原因见 providers/types.ts 的 Platform 注释。
+// TikHub 只负责小红书 / 抖音 / TikTok；其余站点由官方 API 或 OpenCLI 外部适配层接入。
 
 import { PoliteHttpClient } from '../http.js';
 import type { ProviderRegistry } from '../registry.js';

@@ -249,7 +249,7 @@ function diagnose(e: unknown, http: ObservingHttp): string {
     return reachedSearch
       ? '排查：token 换到了但 /search 被拒。检查应用是否被封禁，以及 User-Agent 是否符合 Reddit 要求。'
       : '排查：token 端点就被拒。Reddit 对缺失或可疑 User-Agent 会直接 403，' +
-          '在 .env.local 里设 REDDIT_USER_AGENT=caiji/0.1 (by /u/你的用户名)。';
+          '在 .env.local 里设 REDDIT_USER_AGENT=threadbeacon/0.1 (by /u/你的用户名)。';
   }
   if (msg.includes('429')) {
     return '排查：触发限流。免费档 100 QPM/client，稍后重试；不要靠并发或换 IP 绕过。';

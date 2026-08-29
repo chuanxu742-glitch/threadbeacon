@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   PoliteHttpClient,
   PolitePool,
@@ -61,21 +61,21 @@ describe('PoliteHttpClient 凭据策略', () => {
   });
 
   it('app-credential 模式同样拒绝 Cookie —— 用户会话凭据在任何模式下都不允许', async () => {
-    const http = new PoliteHttpClient({ authMode: 'app-credential' });
+    const http = new PoliteHttpClient({ authMode: 'app-credential', maxRetries: 0 });
     await expect(http.getJson('https://example.com/a', { cookie: 'sid=1' })).rejects.toThrow(
       SessionCredentialError,
     );
   });
 
   it('anonymous 模式拒绝 Authorization，且大小写不敏感', async () => {
-    const http = new PoliteHttpClient();
+    const http = new PoliteHttpClient({ maxRetries: 0 });
     await expect(
       http.getJson('https://example.com/a', { Authorization: 'Bearer x' }),
     ).rejects.toThrow(UnexpectedCredentialError);
   });
 
   it('app-credential 模式放行 Authorization —— 官方 API 是最合规的取数路径', async () => {
-    const http = new PoliteHttpClient({ authMode: 'app-credential' });
+    const http = new PoliteHttpClient({ authMode: 'app-credential', maxRetries: 0 });
     // 只验证凭据校验这一关放行；真实网络调用不在单测范围内
     await expect(
       http.getJson('http://127.0.0.1:9/never', { authorization: 'Bearer x' }),
@@ -83,9 +83,9 @@ describe('PoliteHttpClient 凭据策略', () => {
   });
 
   it('放行不含凭据的普通头', async () => {
-    const http = new PoliteHttpClient();
+    const http = new PoliteHttpClient({ maxRetries: 0 });
     await expect(
-      http.getJson('http://127.0.0.1:9/never', { 'user-agent': 'caiji/0.1' }),
+      http.getJson('http://127.0.0.1:9/never', { 'user-agent': 'threadbeacon/0.1' }),
     ).rejects.not.toThrow(SessionCredentialError);
   });
 

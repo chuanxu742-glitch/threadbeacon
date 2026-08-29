@@ -62,7 +62,6 @@ export const DEFAULT_MIN_SAMPLES = 2;
 export interface ClusteringOptions {
   eps?: number; // DBSCAN 邻域半径 (余弦距离)
   minSamples?: number; // 最小样本数
-  minQuality?: number; // 最小质量分数
   maxClusters?: number; // 最大簇数量
   enableCleaning?: boolean; // 是否启用数据清洗
 }
@@ -88,10 +87,9 @@ export interface ClusteringResult {
   };
 }
 
-export interface ProcessStep {
+interface ProcessStep {
   name: string;
   duration: number;
-  details?: any;
 }
 
 // ==================== 聚类服务 ====================
@@ -111,7 +109,6 @@ export class ClusteringService {
     this.defaultOptions = {
       eps: 0.3, // 余弦距离阈值 (越小越严格)
       minSamples: DEFAULT_MIN_SAMPLES,
-      minQuality: 0.5, // 最小质量分数
       maxClusters: 50, // 最大簇数量
       enableCleaning: true,
       ...options
@@ -217,15 +214,13 @@ export class ClusteringService {
   /**
    * 运行异步步骤并记录
    */
-  private stepAsync<T>(name: string, fn: () => Promise<T>): Promise<T> {
-    return new Promise(async (resolve) => {
-      const start = Date.now();
-      const result = await fn();
-      const duration = Date.now() - start;
-      this.steps.push({ name, duration });
-      console.log(`[ClusteringService] ${name}: ${duration}ms`);
-      resolve(result);
-    });
+  private async stepAsync<T>(name: string, fn: () => Promise<T>): Promise<T> {
+    const start = Date.now();
+    const result = await fn();
+    const duration = Date.now() - start;
+    this.steps.push({ name, duration });
+    console.log(`[ClusteringService] ${name}: ${duration}ms`);
+    return result;
   }
 
   /**
@@ -365,76 +360,4 @@ export class ClusteringService {
     console.log('[ClusteringService] ======================\n');
   }
 
-  /**
-   * 获取处理步骤
-   */
-  getSteps(): ProcessStep[] {
-    return [...this.steps];
-  }
-
-  /**
-   * 切换 Embedding 提供商
-   */
-  switchProvider(provider: IEmbeddingProvider): void {
-    this.embeddingProvider = provider;
-    console.log(`[ClusteringService] 已切换到 ${provider.getName()}`);
-  }
-
-  /**
-   * 获取提供商信息
-   */
-  getProviderInfo() {
-    return {
-      name: this.embeddingProvider.getName(),
-      model: this.embeddingProvider.getModel(),
-      dimension: this.embeddingProvider.getDimension(),
-      costPerMillion: this.embeddingProvider.getCostPerMillionTokens()
-    };
-  }
-
-  /**
-   * 获取统计信息
-   */
-  getStats() {
-    return this.embeddingProvider.getStats();
-  }
-
-  /**
-   * 获取数据清洗器
-   */
-  getDataCleaner(): DataCleaner {
-    return this.dataCleaner;
-  }
 }
-
-// ==================== 工厂函数 ====================
-
-/**
- * 创建聚类服务
- */
-export function createClusteringService(options?: {
-  providerType?: 'openai' | 'zhipuai' | 'auto';
-  embeddingOptions?: ClusteringOptions;
-}): ClusteringService {
-  const providerType = options?.providerType || 'auto';
-
-  let provider: IEmbeddingProvider;
-  if (providerType === 'auto') {
-    provider = createEmbeddingProvider(createConfigFromEnv());
-  } else {
-    provider = createEmbeddingProvider({
-      type: providerType,
-      [providerType]: {
-        apiKey: providerType === 'openai'
-          ? process.env.OPENAI_API_KEY!
-          : process.env.GLM_API_KEY!
-      }
-    });
-  }
-
-  return new ClusteringService(provider, options?.embeddingOptions);
-}
-
-// ==================== 导出 ====================
-
-export default ClusteringService;

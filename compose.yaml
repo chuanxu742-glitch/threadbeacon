@@ -1,0 +1,179 @@
+name: threadbeacon
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: threadbeacon
+      POSTGRES_USER: ${POSTGRES_USER:-threadbeacon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a strong POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${THREADBEACON_S3_ACCESS_KEY:-threadbeacon}
+      MINIO_ROOT_PASSWORD: ${THREADBEACON_S3_SECRET_KEY:?Set a strong THREADBEACON_S3_SECRET_KEY}
+    volumes:
+      - minio-data:/data
+    ports:
+      - "${THREADBEACON_MINIO_CONSOLE_BIND_ADDRESS:-127.0.0.1}:${THREADBEACON_MINIO_CONSOLE_PORT:-9001}:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  control-api:
+    build:
+      context: ./apps/control-api
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: jdbc:postgresql://postgres:5432/threadbeacon
+      POSTGRES_USER: ${POSTGRES_USER:-threadbeacon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a strong POSTGRES_PASSWORD}
+      THREADBEACON_ALLOW_LOCAL_AUTH: "true"
+      THREADBEACON_LOCAL_AUTH_USERNAME: ${THREADBEACON_LOCAL_AUTH_USERNAME:-threadbeacon}
+      THREADBEACON_LOCAL_AUTH_PASSWORD: ${THREADBEACON_LOCAL_AUTH_PASSWORD:?Set THREADBEACON_LOCAL_AUTH_PASSWORD to at least 16 characters}
+      THREADBEACON_LOCAL_AUTH_USER_ID: ${THREADBEACON_LOCAL_AUTH_USER_ID:-local-owner}
+      THREADBEACON_LOCAL_AUTH_EMAIL: ${THREADBEACON_LOCAL_AUTH_EMAIL:-owner@threadbeacon.local}
+      THREADBEACON_LOCAL_AUTH_FULL_NAME: ${THREADBEACON_LOCAL_AUTH_FULL_NAME:-Local Owner}
+      THREADBEACON_NODE_REGISTRATION_KEY: ${THREADBEACON_NODE_REGISTRATION_KEY:?Set a strong THREADBEACON_NODE_REGISTRATION_KEY}
+      THREADBEACON_ENCRYPTION_KEY: ${THREADBEACON_ENCRYPTION_KEY:?Set a distinct strong THREADBEACON_ENCRYPTION_KEY}
+      THREADBEACON_S3_ENDPOINT: http://minio:9000
+      THREADBEACON_S3_ACCESS_KEY: ${THREADBEACON_S3_ACCESS_KEY:-threadbeacon}
+      THREADBEACON_S3_SECRET_KEY: ${THREADBEACON_S3_SECRET_KEY:?Set a strong THREADBEACON_S3_SECRET_KEY}
+      THREADBEACON_S3_BUCKET: ${THREADBEACON_S3_BUCKET:-threadbeacon-reports}
+    pids_limit: 256
+    mem_limit: ${THREADBEACON_CONTROL_MEMORY:-1g}
+    cpus: ${THREADBEACON_CONTROL_CPUS:-1.5}
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./apps/control-plane
+      dockerfile: Dockerfile.web
+    depends_on:
+      control-api:
+        condition: service_healthy
+    ports:
+      - "${THREADBEACON_CONTROL_BIND_ADDRESS:-127.0.0.1}:${THREADBEACON_CONTROL_PORT:-3000}:3000"
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.5
+    restart: unless-stopped
+
+  browser:
+    build:
+      context: ./infra/browser
+    environment:
+      SCREEN_GEOMETRY: ${THREADBEACON_BROWSER_GEOMETRY:-1440x900x24}
+      CHROMIUM_EXTRA_ARGS: ${THREADBEACON_CHROMIUM_EXTRA_ARGS:-}
+    ports:
+      - "${THREADBEACON_NOVNC_BIND_ADDRESS:-127.0.0.1}:${THREADBEACON_NOVNC_PORT:-6080}:6080"
+    expose:
+      - "9222"
+    volumes:
+      - browser-profile:/data/chromium
+    shm_size: ${THREADBEACON_BROWSER_SHM_SIZE:-1gb}
+    pids_limit: 512
+    mem_limit: ${THREADBEACON_BROWSER_MEMORY:-2g}
+    cpus: ${THREADBEACON_BROWSER_CPUS:-2.0}
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: infra/worker/Dockerfile
+    depends_on:
+      control-api:
+        condition: service_healthy
+      browser:
+        condition: service_healthy
+    environment:
+      THREADBEACON_CONTROL_URL: http://control-api:8080
+      THREADBEACON_NODE_NAME: ${THREADBEACON_NODE_NAME:-docker-worker-01}
+      THREADBEACON_NODE_REGISTRATION_KEY: ${THREADBEACON_NODE_REGISTRATION_KEY:?Set a strong THREADBEACON_NODE_REGISTRATION_KEY}
+      THREADBEACON_WORKER_CONCURRENCY: ${THREADBEACON_WORKER_CONCURRENCY:-2}
+      THREADBEACON_WORKER_STATE_FILE: /data/worker-state.json
+      THREADBEACON_BROWSER_PROFILE: docker-chromium
+      OPENCLI_CDP_ENDPOINT: http://browser:9222
+    env_file:
+      - path: .env.worker
+        required: false
+    volumes:
+      - worker-state:/data
+    pids_limit: 512
+    mem_limit: ${THREADBEACON_WORKER_MEMORY:-2g}
+    cpus: ${THREADBEACON_WORKER_CPUS:-2.0}
+    restart: unless-stopped
+
+  # Optional dedicated, cookie-free GEO pool. It never shares the authenticated
+  # browser volume and is enabled explicitly with: docker compose --profile geo up -d
+  geo-browser:
+    profiles: ["geo"]
+    build:
+      context: ./infra/browser
+    environment:
+      SCREEN_GEOMETRY: ${THREADBEACON_BROWSER_GEOMETRY:-1440x900x24}
+      CHROMIUM_EXTRA_ARGS: ${THREADBEACON_GEO_CHROMIUM_EXTRA_ARGS:---incognito}
+    expose:
+      - "9222"
+    volumes:
+      - geo-browser-profile:/data/chromium
+    shm_size: ${THREADBEACON_BROWSER_SHM_SIZE:-1gb}
+    pids_limit: 512
+    mem_limit: ${THREADBEACON_BROWSER_MEMORY:-2g}
+    cpus: ${THREADBEACON_BROWSER_CPUS:-2.0}
+    restart: unless-stopped
+
+  geo-worker:
+    profiles: ["geo"]
+    build:
+      context: .
+      dockerfile: infra/worker/Dockerfile
+    depends_on:
+      control-api:
+        condition: service_healthy
+      geo-browser:
+        condition: service_healthy
+    environment:
+      THREADBEACON_CONTROL_URL: http://control-api:8080
+      THREADBEACON_NODE_NAME: ${THREADBEACON_GEO_NODE_NAME:-docker-geo-worker-01}
+      THREADBEACON_NODE_REGISTRATION_KEY: ${THREADBEACON_NODE_REGISTRATION_KEY:?Set a strong THREADBEACON_NODE_REGISTRATION_KEY}
+      THREADBEACON_WORKER_CONCURRENCY: ${THREADBEACON_GEO_WORKER_CONCURRENCY:-1}
+      THREADBEACON_WORKER_STATE_FILE: /data/worker-state.json
+      THREADBEACON_BROWSER_PROFILE: docker-geo-anonymous
+      THREADBEACON_BROWSER_PROFILE_KIND: anonymous
+      OPENCLI_CDP_ENDPOINT: http://geo-browser:9222
+    env_file:
+      - path: .env.worker
+        required: false
+    volumes:
+      - geo-worker-state:/data
+    pids_limit: 256
+    mem_limit: ${THREADBEACON_WORKER_MEMORY:-2g}
+    cpus: ${THREADBEACON_WORKER_CPUS:-1.0}
+    restart: unless-stopped
+
+volumes:
+  browser-profile:
+  postgres-data:
+  minio-data:
+  worker-state:
+  geo-browser-profile:
+  geo-worker-state:

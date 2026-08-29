@@ -20,7 +20,7 @@ tsconfig —— 如果类型报错，通常说明代码里确实存在未检查�
    fetch 同样不接受。
    > 需要登录态的数据源走外部工具路径（见 `providers/external.ts` 与
    > `providers/xiaohongshu/spider-xhs.ts`）：由使用者自行安装第三方工具，
-   > caiji 以子进程调用，并在 provenance 里如实标记 `auth='user-session'`。
+   > ThreadBeacon 以子进程调用，并在 provenance 里如实标记 `auth='user-session'`。
    > 关键是**如实记录**——把登录态采来的数据标成 `anonymous` 才是真正不可接受的。
    > 应用级凭据（Reddit OAuth、YouTube API key）不在此列，用 `app-credential`。
 2. **在本仓库内实现签名逆向。** `x-s` / `a_bogus` / `x5sec` 及同类，
@@ -32,7 +32,7 @@ tsconfig —— 如果类型报错，通常说明代码里确实存在未检查�
 若某数据源只能靠外部工具取到，走「外部依赖」模式，不要把它的代码复制进来：
 
 - 在 `scripts/` 下写一个桥接脚本（本仓库原创），以 JSON 与之交换数据
-- provider 用 `ExternalToolPort` 声明真实的 `authMode`
+- 外部工具型 provider 直接向 `BaseProvider` 声明真实的 `authMode`
 - 该工具由使用者自行安装，用环境变量指向；`.env.example` 里写清 license 与限制
 - **先读它的 LICENSE 原文**：无 LICENSE 文件 = 全版权保留 = 代码不可复制、
   不可分发，只能这样外部调用

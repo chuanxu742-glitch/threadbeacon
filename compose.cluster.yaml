@@ -1,0 +1,93 @@
+name: threadbeacon-execution
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: infra/gateway/Dockerfile
+    environment:
+      THREADBEACON_GATEWAY_LISTEN: 0.0.0.0:8789
+      THREADBEACON_GATEWAY_AGENT_TOKEN: ${THREADBEACON_GATEWAY_AGENT_TOKEN:?Set a strong THREADBEACON_GATEWAY_AGENT_TOKEN}
+      THREADBEACON_GATEWAY_CONTROL_TOKEN: ${THREADBEACON_GATEWAY_CONTROL_TOKEN:?Set a different strong THREADBEACON_GATEWAY_CONTROL_TOKEN}
+      THREADBEACON_GATEWAY_ID: ${THREADBEACON_GATEWAY_ID:-compose-gateway-01}
+      THREADBEACON_GATEWAY_NODE_NAME: ${THREADBEACON_GATEWAY_NODE_NAME:-compose-gateway-01}
+      THREADBEACON_GATEWAY_PUBLIC_URL: ${THREADBEACON_GATEWAY_PUBLIC_URL:?Set the public HTTPS Gateway URL reachable by the control plane}
+      THREADBEACON_GATEWAY_STATE_FILE: /data/gateway-state.json
+      THREADBEACON_CONTROL_URL: ${THREADBEACON_CONTROL_URL:?Set the private control-plane URL}
+      THREADBEACON_NODE_REGISTRATION_KEY: ${THREADBEACON_NODE_REGISTRATION_KEY:?Set the control-plane registration key}
+      THREADBEACON_GATEWAY_DISPATCH_TIMEOUT_MS: ${THREADBEACON_GATEWAY_DISPATCH_TIMEOUT_MS:-120000}
+    ports:
+      - "${THREADBEACON_GATEWAY_BIND_ADDRESS:-127.0.0.1}:${THREADBEACON_GATEWAY_PORT:-8789}:8789"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8789/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    volumes:
+      - gateway-state:/data
+    pids_limit: 256
+    mem_limit: ${THREADBEACON_GATEWAY_MEMORY:-512m}
+    cpus: ${THREADBEACON_GATEWAY_CPUS:-1.0}
+    restart: unless-stopped
+
+  browser:
+    build:
+      context: ./infra/browser
+    environment:
+      SCREEN_GEOMETRY: ${THREADBEACON_BROWSER_GEOMETRY:-1440x900x24}
+      CHROMIUM_EXTRA_ARGS: ${THREADBEACON_CHROMIUM_EXTRA_ARGS:-}
+    expose:
+      - "6080"
+      - "9222"
+    volumes:
+      - browser-profile:/data/chromium
+    shm_size: ${THREADBEACON_BROWSER_SHM_SIZE:-1gb}
+    pids_limit: 512
+    mem_limit: ${THREADBEACON_BROWSER_MEMORY:-2g}
+    cpus: ${THREADBEACON_BROWSER_CPUS:-2.0}
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: infra/worker/Dockerfile
+    depends_on:
+      gateway:
+        condition: service_healthy
+      browser:
+        condition: service_healthy
+    environment:
+      THREADBEACON_CONTROL_URL: ${THREADBEACON_CONTROL_URL:?Set the private control-plane URL}
+      THREADBEACON_NODE_NAME: ${THREADBEACON_NODE_NAME:-compose-agent-01}
+      THREADBEACON_NODE_REGISTRATION_KEY: ${THREADBEACON_NODE_REGISTRATION_KEY:?Set the control-plane registration key}
+      THREADBEACON_WORKER_CONCURRENCY: ${THREADBEACON_WORKER_CONCURRENCY:-2}
+      THREADBEACON_WORKER_STATE_FILE: /data/worker-state.json
+      THREADBEACON_GATEWAY_WS_URL: ws://gateway:8789/agent
+      # This opt-in is safe only because the traffic stays on the private Compose network.
+      THREADBEACON_GATEWAY_ALLOW_INSECURE_WS: "1"
+      THREADBEACON_GATEWAY_TOKEN: ${THREADBEACON_GATEWAY_AGENT_TOKEN:?Set a strong THREADBEACON_GATEWAY_AGENT_TOKEN}
+      THREADBEACON_GATEWAY_AGENT_ID: ${THREADBEACON_GATEWAY_AGENT_ID:-compose-agent-01}
+      THREADBEACON_BROWSER_PROFILE: compose-chromium
+      OPENCLI_CDP_ENDPOINT: http://browser:9222
+    env_file:
+      - path: .env.worker
+        required: false
+    volumes:
+      - worker-state:/data
+    pids_limit: 512
+    mem_limit: ${THREADBEACON_WORKER_MEMORY:-2g}
+    cpus: ${THREADBEACON_WORKER_CPUS:-2.0}
+    restart: unless-stopped
+
+volumes:
+  browser-profile:
+  gateway-state:
+  worker-state:

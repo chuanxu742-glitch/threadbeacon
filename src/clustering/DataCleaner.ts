@@ -241,15 +241,4 @@ export class DataCleaner {
     };
   }
 
-  /**
-   * 获取清洗统计信息
-   */
-  getCleanStats(originalCount: number, cleanedCount: number) {
-    return {
-      original: originalCount,
-      cleaned: cleanedCount,
-      removed: originalCount - cleanedCount,
-      keepRate: originalCount > 0 ? (cleanedCount / originalCount * 100).toFixed(1) + '%' : '0%'
-    };
-  }
 }

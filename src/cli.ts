@@ -1,5 +1,5 @@
-﻿#!/usr/bin/env -S npx tsx
-// caiji 命令行入口。
+#!/usr/bin/env -S npx tsx
+// threadbeacon 命令行入口。
 //
 //   pnpm doctor                          检查各数据源可达性与凭据配置
 //   pnpm cli analyze <platform> <关键词>  跑一次分析并落盘
@@ -9,16 +9,11 @@ import { ClusteringService } from './clustering/ClusteringService.js';
 import { loadEnvFiles } from './env.js';
 import { configureProxyFromEnv } from './net/proxy.js';
 import { createLlmClient, llmConfigFromEnv } from './llm/index.js';
-import { analyze } from './pipeline/analyze.js';
+import { analyze, summaryConcurrencyFromEnv } from './pipeline/analyze.js';
 import { DEFAULT_STORE_DIR, listReports, loadReport, saveReport } from './pipeline/store.js';
-import { BlueskyJetstreamProvider } from './providers/bluesky-jetstream.js';
-import { PoliteHttpClient } from './providers/http.js';
-import { RedditProvider } from './providers/reddit.js';
-import { ProviderRegistry } from './providers/registry.js';
-import { registerTikHub } from './providers/tikhub/index.js';
-import { SpiderXhsProvider } from './providers/xiaohongshu/spider-xhs.js';
-import { YouTubeProvider } from './providers/youtube.js';
+import { createOpenCliProvider } from './providers/opencli.js';
 import type { Platform } from './providers/types.js';
+import { buildRegistry } from './runtime.js';
 
 const env = process.env;
 
@@ -30,53 +25,6 @@ const PROBES: ReadonlyArray<{ name: string; url: string; needs: string[] }> = [
   // 一个 key 覆盖小红书 / 抖音 / TikTok
   { name: 'TikHub', url: 'https://api.tikhub.io/health', needs: ['TIKHUB_API_KEY'] },
 ];
-
-function buildRegistry(): ProviderRegistry {
-  const reg = new ProviderRegistry();
-  // Bluesky 的历史检索需用户凭据（实测 403），只注册无需授权的实时流
-  reg.register(new BlueskyJetstreamProvider({ http: new PoliteHttpClient() }));
-
-  if (env['REDDIT_CLIENT_ID'] && env['REDDIT_CLIENT_SECRET']) {
-    reg.register(
-      new RedditProvider({
-        http: new PoliteHttpClient({ authMode: 'app-credential' }),
-        clientId: env['REDDIT_CLIENT_ID'],
-        clientSecret: env['REDDIT_CLIENT_SECRET'],
-        ...(env['REDDIT_USER_AGENT'] ? { userAgent: env['REDDIT_USER_AGENT'] } : {}),
-      }),
-    );
-  }
-  if (env['YOUTUBE_API_KEY']) {
-    reg.register(
-      new YouTubeProvider({
-        http: new PoliteHttpClient({ authMode: 'app-credential' }),
-        apiKey: env['YOUTUBE_API_KEY'],
-      }),
-    );
-  }
-  // 小红书走 Spider_XHS（自有账号登录态）。与 TikHub 的小红书 kind 不同，
-  // registry 按 (platform, kind) 索引，两者可并存，resolve 时按合规优先级选
-  if (env['SPIDER_XHS_PATH']) {
-    reg.register(
-      new SpiderXhsProvider({
-        spiderPath: env['SPIDER_XHS_PATH'],
-        cookieFile: env['SPIDER_XHS_COOKIE'] ?? '.spider-xhs-cookie.json',
-        ...(env['PYTHON_BIN'] ? { pythonBin: env['PYTHON_BIN'] } : {}),
-      }),
-    );
-  }
-  // 一个 token 打通小红书 / 抖音 / TikTok
-  if (env['TIKHUB_API_KEY']) {
-    registerTikHub(reg, {
-      apiToken: env['TIKHUB_API_KEY'],
-      useChinaDomain: env['TIKHUB_USE_CN_DOMAIN'] === '1',
-      ...(env['TIKHUB_MAX_COMMENTS']
-        ? { maxCommentsPerPost: Number(env['TIKHUB_MAX_COMMENTS']) }
-        : {}),
-    });
-  }
-  return reg;
-}
 
 async function doctor(envFiles: readonly string[]): Promise<number> {
   console.log(
@@ -126,6 +74,9 @@ async function runAnalyze(platform: string, keyword: string, limitArg?: string):
   }
 
   const registry = buildRegistry();
+  if (platform.startsWith('opencli:')) {
+    registry.register(await createOpenCliProvider(platform.slice('opencli:'.length)));
+  }
   const available = [
     ...new Set([
       ...registry.platformsSupporting('searchAll'),
@@ -142,7 +93,12 @@ async function runAnalyze(platform: string, keyword: string, limitArg?: string):
 
   const llm = createLlmClient(llmConfigFromEnv(env));
   const report = await analyze(
-    { registry, clustering: new ClusteringService(), llm },
+    {
+      registry,
+      clustering: new ClusteringService(),
+      llm,
+      summaryConcurrency: summaryConcurrencyFromEnv(env),
+    },
     { platform: platform as Platform, keyword, limit, includeComments: true },
   );
 
@@ -153,8 +109,15 @@ async function runAnalyze(platform: string, keyword: string, limitArg?: string):
   console.log(
     `共 ${report.stats.totalTexts} 条（帖子 ${posts} / 评论 ${comments}），` +
       `聚出 ${report.stats.clusterCount} 个簇，噪声 ${report.stats.noiseCount} 条，` +
+      `完成归纳 ${report.stats.summarizedClusters}/${report.stats.clusterCount} 个簇，` +
       `数据可靠性：${report.dataQuality}`,
   );
+  if (report.stats.skippedClusters > 0) {
+    console.warn(
+      `警告：${report.stats.skippedClusters} 个簇因模型拒答、空响应或非法 JSON 未生成洞察；` +
+        `原始数据仍已完整保留。`,
+    );
+  }
   for (const p of report.painPoints) {
     console.log(`\n[${p.severity}/5] ${p.theme}（${p.size} 条）\n  ${p.summary}`);
   }
@@ -212,10 +175,11 @@ async function main(): Promise<number> {
     default:
       console.log(
         [
-          'caiji —— 多平台社媒公开数据采集与聚合分析',
+          'threadbeacon —— 多平台社媒公开数据采集与聚合分析',
           '',
           '  pnpm doctor                          检查数据源可达性与凭据配置',
           '  pnpm cli analyze <platform> <关键词> [limit]   采集、分析并落盘',
+          '      OpenCLI 平台写作 opencli:<site>，例如 opencli:hackernews',
           '  pnpm cli list                        列出已有报告',
           '  pnpm cli export <目录>                重新导出已有报告的 CSV/JSON',
           '',

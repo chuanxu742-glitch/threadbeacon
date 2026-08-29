@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ClusteringService } from '../src/clustering/ClusteringService.js';
-import { analyze } from '../src/pipeline/analyze.js';
+import { analyze, summaryConcurrencyFromEnv } from '../src/pipeline/analyze.js';
 import { gradeQuality } from '../src/pipeline/report.js';
 import { ProviderRegistry } from '../src/providers/registry.js';
 import type { ChatRequest, ILlmClient, LlmResult } from '../src/llm/types.js';
@@ -103,6 +103,8 @@ describe('analyze 端到端', () => {
     expect(report.painPoints).toHaveLength(2);
     expect(report.stats.clusterCount).toBe(2);
     expect(report.stats.noiseCount).toBe(0);
+    expect(report.stats.summarizedClusters).toBe(2);
+    expect(report.stats.skippedClusters).toBe(0);
     expect(report.painPoints.map((p) => p.theme).sort()).toEqual(['价格', '续航']);
     expect(report.provenance.auth).toBe('anonymous');
     expect(report.keyword).toBe('x');
@@ -154,6 +156,8 @@ describe('analyze 端到端', () => {
     const report = await analyze(deps(fakeLlm(() => '', true)), req);
     expect(report.painPoints).toHaveLength(0);
     expect(report.stats.clusterCount).toBe(2);
+    expect(report.stats.summarizedClusters).toBe(0);
+    expect(report.stats.skippedClusters).toBe(2);
     // 洞察没出来，但原始数据仍然完整落下
     expect(report.items).toHaveLength(TEXTS.length);
   });
@@ -229,6 +233,44 @@ describe('analyze 端到端', () => {
     const report = await analyze(deps(llm), req);
     expect(report.dataQuality).toBe('exploratory');
   });
+
+  it('并行归纳受 summaryConcurrency 上限约束', async () => {
+    let active = 0;
+    let maxActive = 0;
+    async function asyncReply(r: ChatRequest): Promise<string> {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return goodJson(r.messages[0]!.content.includes('续航') ? '续航' : '价格');
+    }
+
+    // fakeLlm 原本接受同步回调；这里直接覆盖 complete 来模拟真实异步请求。
+    const asyncLlm: ILlmClient = {
+      format: 'openai',
+      model: 'fake',
+      async complete(r) {
+        return {
+          text: await asyncReply(r),
+          model: 'fake',
+          usage: { inputTokens: 0, outputTokens: 0 },
+          stopReason: 'end_turn',
+          refused: false,
+        };
+      },
+    };
+    await analyze({ ...deps(asyncLlm), summaryConcurrency: 1 }, req);
+    expect(maxActive).toBe(1);
+  });
+
+  it('库入口拒绝空关键词、无效 limit 与无效并发数', async () => {
+    const llm = fakeLlm(() => goodJson('x'));
+    await expect(analyze(deps(llm), { ...req, keyword: '  ' })).rejects.toThrow(/keyword/);
+    await expect(analyze(deps(llm), { ...req, limit: 0 })).rejects.toThrow(/limit/);
+    await expect(analyze({ ...deps(llm), summaryConcurrency: 0 }, req)).rejects.toThrow(
+      /summaryConcurrency/,
+    );
+  });
 });
 
 describe('gradeQuality', () => {
@@ -236,5 +278,14 @@ describe('gradeQuality', () => {
     expect(gradeQuality(10)).toBe('exploratory');
     expect(gradeQuality(50)).toBe('preliminary');
     expect(gradeQuality(200)).toBe('reliable');
+  });
+});
+
+describe('summaryConcurrencyFromEnv', () => {
+  it('默认 4，且拒绝无效值', () => {
+    expect(summaryConcurrencyFromEnv({})).toBe(4);
+    expect(summaryConcurrencyFromEnv({ LLM_MAX_CONCURRENCY: '2' })).toBe(2);
+    expect(() => summaryConcurrencyFromEnv({ LLM_MAX_CONCURRENCY: '0' })).toThrow(/正整数/);
+    expect(() => summaryConcurrencyFromEnv({ LLM_MAX_CONCURRENCY: 'abc' })).toThrow(/正整数/);
   });
 });
