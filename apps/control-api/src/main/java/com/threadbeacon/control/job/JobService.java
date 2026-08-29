@@ -171,7 +171,7 @@ public class JobService {
     }
 
     private Map<String, Object> completeTransaction(WorkerNode node, String jobId, Map<String, Object> report, String objectKey) {
-        var jobs = jdbc.queryForList("SELECT owner_id,platform,keyword,attempt FROM jobs WHERE id=? AND assigned_node_id=? AND status='running' FOR UPDATE", jobId, node.id());
+        var jobs = jdbc.queryForList("SELECT owner_id,platform,keyword,attempt,source_options_json FROM jobs WHERE id=? AND assigned_node_id=? AND status='running' FOR UPDATE", jobId, node.id());
         if (jobs.isEmpty()) throw new ApiException(HttpStatus.CONFLICT, "任务租约已经失效");
         var job = jobs.get(0); var ownerId = text(job.get("owner_id")); var platform = text(job.get("platform")); var timestamp = now();
         var items = array(report.get("items")); var painPoints = array(report.get("painPoints")); var reportId = id();
@@ -187,6 +187,13 @@ public class JobService {
         event(jobId, "completed", summary, timestamp);
         completeWorkflowSource(jobId, report, timestamp);
         persistEvidence(ownerId, jobId, reportId, painPoints, recordIds, timestamp);
+        var options = object(parse(mapper, job.get("source_options_json"), Map.of()));
+        var projectSourceId = text(options.get("sourceId"));
+        if (bool(options.get("sourceTest"), false) && !projectSourceId.isBlank()) {
+            jdbc.update("UPDATE project_sources SET status='active',updated_at=? WHERE id=? AND owner_id=?", timestamp, projectSourceId, ownerId);
+            jdbc.update("UPDATE project_source_cursors SET cursor_json=?,last_success_at=?,last_job_id=?,consecutive_failures=0,last_error=NULL,updated_at=? WHERE source_id=? AND owner_id=?",
+                    json(mapper, object(report.get("sourceCursor"))), timestamp, jobId, timestamp, projectSourceId, ownerId);
+        }
         if (platform.equals("geo")) {
             var geo = object(report.get("geoAcquisition"));
             var trace = report.get("geoTrace");
@@ -200,7 +207,7 @@ public class JobService {
 
     public Map<String, Object> fail(WorkerNode node, String jobId, String message) {
         return transactions.execute(status -> {
-            var jobs = jdbc.queryForList("SELECT attempt,max_attempts,platform FROM jobs WHERE id=? AND assigned_node_id=? AND status='running' FOR UPDATE", jobId, node.id());
+            var jobs = jdbc.queryForList("SELECT owner_id,attempt,max_attempts,platform,source_options_json FROM jobs WHERE id=? AND assigned_node_id=? AND status='running' FOR UPDATE", jobId, node.id());
             if (jobs.isEmpty()) throw new ApiException(HttpStatus.CONFLICT, "任务租约已经失效");
             var job = jobs.get(0); var attempt = integer(job.get("attempt"), 0); var maxAttempts = integer(job.get("max_attempts"), 3);
             var next = attempt >= maxAttempts ? "failed" : "queued"; var timestamp = now();
@@ -214,6 +221,13 @@ public class JobService {
                 jdbc.update("UPDATE workflow_run_jobs SET status='failed',result_json=?,updated_at=? WHERE job_id=?", json(mapper, Map.of("error", message)), timestamp, jobId);
                 jdbc.update("UPDATE workflow_checkpoints SET status='failed',output_json=?,finished_at=?,updated_at=? WHERE run_id=(SELECT run_id FROM workflow_run_jobs WHERE job_id=?) AND node_id=(SELECT source_node_id FROM workflow_run_jobs WHERE job_id=?)", json(mapper, Map.of("error", message)), timestamp, timestamp, jobId, jobId);
                 jdbc.update("UPDATE workflow_runs SET status='failed',last_error=?,finished_at=?,updated_at=? WHERE id=(SELECT run_id FROM workflow_run_jobs WHERE job_id=?)", message, timestamp, timestamp, jobId);
+            }
+            var options = object(parse(mapper, job.get("source_options_json"), Map.of()));
+            var projectSourceId = text(options.get("sourceId"));
+            if (next.equals("failed") && bool(options.get("sourceTest"), false) && !projectSourceId.isBlank()) {
+                jdbc.update("UPDATE project_sources SET status='error',updated_at=? WHERE id=? AND owner_id=?", timestamp, projectSourceId, text(job.get("owner_id")));
+                jdbc.update("UPDATE project_source_cursors SET consecutive_failures=consecutive_failures+1,last_error=?,updated_at=? WHERE source_id=? AND owner_id=?",
+                        message, timestamp, projectSourceId, text(job.get("owner_id")));
             }
             if ("geo".equals(text(job.get("platform")))) {
                 jdbc.update("""
@@ -231,6 +245,22 @@ public class JobService {
             AND (?='' OR content ILIKE '%'||?||'%' OR COALESCE(title,'') ILIKE '%'||?||'%')
             ORDER BY last_seen_at DESC LIMIT ? OFFSET ?
             """, ownerId, platform, platform, search, search, search, Math.max(1, Math.min(500, limit)), Math.max(0, offset));
+    }
+
+    public int recordCount(String ownerId, String search, String platform) {
+        return jdbc.queryForObject("""
+            SELECT count(*) FROM records WHERE owner_id=? AND (?='' OR platform=?)
+            AND (?='' OR content ILIKE '%'||?||'%' OR COALESCE(title,'') ILIKE '%'||?||'%')
+            """, Integer.class, ownerId, platform, platform, search, search, search);
+    }
+
+    public List<Map<String, Object>> exportRecords(String ownerId, String search, String platform) {
+        return jdbc.queryForList("""
+            SELECT id,platform,source_item_id,item_type,title,content,author,url,observed_at,duplicate_count
+            FROM records WHERE owner_id=? AND (?='' OR platform=?)
+            AND (?='' OR content ILIKE '%'||?||'%' OR COALESCE(title,'') ILIKE '%'||?||'%')
+            ORDER BY last_seen_at DESC
+            """, ownerId, platform, platform, search, search, search);
     }
 
     public Map<String, Object> reportMeta(String ownerId, String reportId) {
