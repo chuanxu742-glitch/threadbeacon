@@ -41,7 +41,8 @@ docker compose ps
 - 管理台：<http://127.0.0.1:3000>
 - 浏览器桌面：<http://127.0.0.1:6080/vnc.html>
 
-打开管理台时浏览器会弹出 Basic Auth 挑战，输入 `.env` 中的本地用户名和密码。CDP
+打开管理台后会进入 ThreadBeacon 登录页，输入 `.env` 中的本地用户名和密码；若部署方配置了
+OIDC，也可使用企业身份入口。浏览器不会再显示原生 Basic Auth 弹窗。CDP
 `9222` 只暴露给 Compose 内部网络中的 Worker，不发布到宿主机。
 
 PostgreSQL、MinIO、浏览器登录态和 Worker 注册身份分别保存在 Docker volume，容器重建不会

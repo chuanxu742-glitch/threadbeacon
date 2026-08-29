@@ -4,7 +4,6 @@ import com.threadbeacon.control.access.PatAuthenticationFilter;
 import com.threadbeacon.control.common.CurrentUser;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.security.config.Customizer;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.core.userdetails.User;
@@ -57,7 +56,7 @@ public class SecurityConfig {
         http
                 .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/health", "/actuator/health/**", "/api/worker/**", "/api/browser/worker/**", "/api/integrations/webhooks/*").permitAll()
+                        .requestMatchers("/api/health", "/api/auth/methods", "/actuator/health/**", "/api/worker/**", "/api/browser/worker/**", "/api/integrations/webhooks/*").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/nodes").permitAll()
                         .requestMatchers("/api/admin/**", "/api/integrations/tokens/**")
                         .access((authentication, context) -> new AuthorizationDecision(
@@ -68,7 +67,12 @@ public class SecurityConfig {
                         .requestMatchers("/api/**").access((authentication, context) -> new AuthorizationDecision(
                                 authentication.get().isAuthenticated() && rank(currentUser.role()) >= 2))
                         .anyRequest().authenticated())
-                .httpBasic(Customizer.withDefaults())
+                .httpBasic(basic -> basic.authenticationEntryPoint((request, response, error) -> {
+                    response.setStatus(401);
+                    response.setContentType("application/json;charset=UTF-8");
+                    response.getWriter().write("{\"error\":\"需要登录或登录已失效\"}");
+                }))
+                .logout(logout -> logout.logoutSuccessHandler((request, response, authentication) -> response.setStatus(204)))
                 .addFilterBefore(pat, BasicAuthenticationFilter.class)
                 .headers(headers -> headers.contentSecurityPolicy(csp -> csp.policyDirectives("default-src 'none'; frame-ancestors 'none'")));
         if (registrations.getIfAvailable() != null) {

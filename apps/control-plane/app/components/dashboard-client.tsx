@@ -248,6 +248,7 @@ export function DashboardClient({ user }: { user: { displayName: string; email: 
           <a className="nav-item" href="#reports"><span>▤</span>分析报告</a>
           <a className="nav-item" href="/studio"><span>⌘</span>工作流与治理</a>
           <a className="nav-item" href="/skills"><span>◈</span>Skill 治理</a>
+          <a className="nav-item" href="/about"><span>?</span>项目与架构</a>
         </nav>
         <div className="sidebar-foot"><span className="system-dot" /><span><strong>{error ? '连接异常' : '系统正常'}</strong><small>{loading ? '正在同步状态' : '控制平面已连接'}</small></span></div>
       </aside>
