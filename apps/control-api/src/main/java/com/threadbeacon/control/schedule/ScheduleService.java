@@ -34,7 +34,7 @@ public class ScheduleService {
     public Map<String,Object> create(String ownerId,Map<String,Object> body){
         var name=text(body.get("name"));var platform=text(body.get("platform"));var keyword=text(body.get("keyword"));var interval=integer(body.get("intervalMinutes"),60);var cron=text(body.get("cronExpression"));var timezone=text(body.get("timezone"));if(timezone.isBlank())timezone="UTC";
         if(name.isBlank()||name.length()>80||keyword.isBlank()||interval<1||interval>525600)throw new ApiException(HttpStatus.BAD_REQUEST,"定时计划参数无效");
-        if(!cron.isBlank()){try{CronExpression.parse(cron);ZoneId.of(timezone);}catch(Exception error){throw new ApiException(HttpStatus.BAD_REQUEST,"Cron 表达式或时区无效");}}
+        if(!cron.isBlank()){try{parseCron(cron);ZoneId.of(timezone);}catch(Exception error){throw new ApiException(HttpStatus.BAD_REQUEST,"Cron 表达式或时区无效");}}
         var scheduleId=id();var timestamp=now();var next=bool(body.get("runImmediately"),true)?timestamp:nextRun(interval,cron,timezone,Instant.now());
         jdbc.update("""
             INSERT INTO schedules(id,owner_id,name,platform,keyword,source_options_json,"limit",include_comments,interval_minutes,cron_expression,timezone,priority,enabled,next_run_at,created_at,updated_at)
@@ -68,7 +68,8 @@ public class ScheduleService {
 
     private String nextRun(int interval,String cron,String timezone,Instant from){
         if(cron.isBlank())return from.plus(interval,ChronoUnit.MINUTES).toString();
-        var next=CronExpression.parse(cron).next(ZonedDateTime.ofInstant(from,ZoneId.of(timezone)));if(next==null)throw new ApiException(HttpStatus.BAD_REQUEST,"Cron 无法计算下一次运行时间");return next.toInstant().toString();
+        var next=parseCron(cron).next(ZonedDateTime.ofInstant(from,ZoneId.of(timezone)));if(next==null)throw new ApiException(HttpStatus.BAD_REQUEST,"Cron 无法计算下一次运行时间");return next.toInstant().toString();
     }
+    static CronExpression parseCron(String value){var cron=value.trim();if(cron.split("\\s+").length==5)cron="0 "+cron;return CronExpression.parse(cron);}
     private void requireChanged(int changed){if(changed!=1)throw new ApiException(HttpStatus.NOT_FOUND,"计划不存在");}
 }

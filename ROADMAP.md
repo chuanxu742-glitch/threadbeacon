@@ -14,8 +14,8 @@ This file is the source of truth for unfinished product validation. A checked it
 
 - [x] Add a documented one-command native startup path and prerequisite checks; Docker remains optional.
 - [ ] Validate a full collection → clustering → LLM analysis → evidence report run with an external model credential.
-- [ ] Validate interval and Cron schedules: create, immediate run, pause, resume, and restart recovery.
-- [ ] Validate workflow draft, publish, run, checkpoints, source merge, gate behavior, and finalization.
+- [x] Validate interval and Cron schedules: create, immediate run, pause, resume, and restart recovery.
+- [x] Validate workflow draft, publish, run, checkpoints, source merge, gate behavior, and finalization.
 - [x] Replace raw JSON parse errors on unauthenticated API responses with a clear login/authorization state.
 
 ## P1 — governed integrations
