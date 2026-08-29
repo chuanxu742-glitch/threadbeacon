@@ -194,6 +194,7 @@ PostgreSQL 独立执行状态、30 秒租约、S3/MinIO 报告与 Trace；只有
 Java 控制面的 `/api/mcp` 支持初始化、工具发现和工具调用。外部客户端使用仅显示一次的 `threadbeacon_` PAT，
 服务端校验过期、撤销、角色与 REST/MCP scopes；当前提供记录查询、工作流运行/查询和 Skill 查询/运行工具。
 自动交付对网络错误、HTTP 408/429 与 HTTP 5xx 最多尝试三次，并为每次尝试保留审计记录。
+RSS、REST 与公开网页来源会持久化条件请求游标；URL 只支持 `{keyword}`、`{limit}` 两个受限模板。
 
 ### 启用小红书
 

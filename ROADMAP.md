@@ -27,6 +27,9 @@ This file is the source of truth for unfinished product validation. A checked it
 - [x] Validate workspace invitations and owner/editor/viewer authorization boundaries.
 - [ ] Validate GEO official-site submission, SSRF/robots enforcement, trace artifacts, cancel, and idempotency.
 - [ ] Validate RSS, REST, and public-web source cursors and failure recovery.
+  - [x] REST: real public-IP collection plus retry exhaustion, recovery, and persisted-cursor reuse.
+  - [ ] RSS: retry exhaustion and control-plane cursor reuse passed; real fetch is blocked by this host's reserved-range DNS proxy.
+  - [ ] Public web: retry exhaustion passed; real fetch/robots acceptance is blocked by the same DNS proxy.
 - [ ] Add Reddit comment collection and Jetstream DID-to-handle enrichment.
 - [ ] Add the authenticated creator-owned `fetchOwned` API with explicit scope and audit records.
 - [ ] Execute imported Dify code/tool/plugin nodes in an isolated sandbox before declaring them supported.
