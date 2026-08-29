@@ -25,7 +25,3 @@ export async function configureProxyFromEnv(
   applied = url;
   return url;
 }
-
-export function activeProxy(): string | undefined {
-  return applied;
-}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { apiJson } from './api-json.js';
 
 type Job = {
   id: string; platform: string; keyword: string; limit: number; status: string; progress: number;
@@ -113,10 +114,10 @@ export function DashboardClient({ user }: { user: { displayName: string; email: 
   const refresh = useCallback(async () => {
     try {
       const response = await fetch('/api/dashboard', { cache: 'no-store' });
-      const body = await response.json() as Data & { error?: string };
+      const body = await apiJson(response) as Data & { error?: string };
       if (!response.ok) throw new Error(body.error ?? '加载控制平面失败');
       setData(body);
-      try{const catalogResponse=await fetch('/api/platforms',{cache:'no-store'});if(catalogResponse.ok){const catalog=await catalogResponse.json() as {platforms?:PlatformCatalogItem[]};setCatalogPlatforms(catalog.platforms??[]);}}catch{/* 目录加载失败时继续使用 Worker 能力与内置目录 */}
+      try{const catalogResponse=await fetch('/api/platforms',{cache:'no-store'});if(catalogResponse.ok){const catalog=await apiJson(catalogResponse) as {platforms?:PlatformCatalogItem[]};setCatalogPlatforms(catalog.platforms??[]);}}catch{/* 目录加载失败时继续使用 Worker 能力与内置目录 */}
       setError('');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '加载控制平面失败');
@@ -149,7 +150,7 @@ export function DashboardClient({ user }: { user: { displayName: string; email: 
           ...(opencliCommand ? { opencliCommand, opencliArgs } : {}),
         }),
       });
-      const body = await response.json() as { error?: string };
+      const body = await apiJson(response) as { error?: string };
       if (!response.ok) throw new Error(body.error ?? '创建任务失败');
       setShowCreate(false);
       await refresh();
@@ -178,7 +179,7 @@ export function DashboardClient({ user }: { user: { displayName: string; email: 
           ...(opencliCommand ? { opencliCommand, opencliArgs } : {}),
         }),
       });
-      const body = await response.json() as { error?: string };
+      const body = await apiJson(response) as { error?: string };
       if (!response.ok) throw new Error(body.error ?? '创建定时计划失败');
       setShowSchedule(false);setScheduleMode('interval');
       await refresh();
@@ -194,7 +195,7 @@ export function DashboardClient({ user }: { user: { displayName: string; email: 
       const response = await fetch(`/api/schedules/${schedule.id}`, {
         method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action }),
       });
-      const body = await response.json() as { error?: string };
+      const body = await apiJson(response) as { error?: string };
       if (!response.ok) throw new Error(body.error ?? '操作定时计划失败');
       await refresh();
     } catch (reason) {
@@ -213,7 +214,7 @@ export function DashboardClient({ user }: { user: { displayName: string; email: 
     setRecordFilter({search,platform});
     try {
       const response = await fetch(`/api/records?${params}`, { cache: 'no-store' });
-      const body = await response.json() as { records?: RecordItem[]; total?: number; error?: string };
+      const body = await apiJson(response) as { records?: RecordItem[]; total?: number; error?: string };
       if (!response.ok) throw new Error(body.error ?? '搜索数据记录失败');
       setRecordResults(body.records ?? []);
       setRecordTotal(body.total ?? 0);
@@ -225,12 +226,12 @@ export function DashboardClient({ user }: { user: { displayName: string; email: 
   async function act(job: Job, action: 'cancel' | 'retry') {
     try {
       const response = await fetch(`/api/jobs/${job.id}`, { method:'PATCH', headers:{'content-type':'application/json'}, body:JSON.stringify({ action }) });
-      const body = await response.json() as { error?: string };
+      const body = await apiJson(response) as { error?: string };
       if (!response.ok) throw new Error(body.error ?? '操作失败');
       await refresh();
     } catch (reason) { setError(reason instanceof Error ? reason.message : '操作失败'); }
   }
-  async function viewTrace(job:Job){setTraceJob(job);setTraceLoading(true);setTraceEvents([]);try{const response=await fetch(`/api/jobs/${job.id}/events?limit=200`,{cache:'no-store'});const body=await response.json() as {events?:JobEvent[];error?:string};if(!response.ok)throw new Error(body.error??'加载事件失败');setTraceEvents(body.events??[]);}catch(reason){setError(reason instanceof Error?reason.message:'加载事件失败');}finally{setTraceLoading(false);}}
+  async function viewTrace(job:Job){setTraceJob(job);setTraceLoading(true);setTraceEvents([]);try{const response=await fetch(`/api/jobs/${job.id}/events?limit=200`,{cache:'no-store'});const body=await apiJson(response) as {events?:JobEvent[];error?:string};if(!response.ok)throw new Error(body.error??'加载事件失败');setTraceEvents(body.events??[]);}catch(reason){setError(reason instanceof Error?reason.message:'加载事件失败');}finally{setTraceLoading(false);}}
   function exportUrl(format:'csv'|'json'){const params=new URLSearchParams({format});if(recordFilter.search)params.set('search',recordFilter.search);if(recordFilter.platform)params.set('platform',recordFilter.platform);return`/api/exports?${params}`;}
 
   return (

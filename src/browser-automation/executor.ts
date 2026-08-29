@@ -2,6 +2,7 @@ import { lookup } from 'node:dns/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { CDPBridge } from '@jackwener/opencli/browser/cdp';
 import { assertPublicSourceUrl, isPublicAddress } from '../providers/generic-web.js';
+import { isAllowedBrowserHost, normalizeBrowserAllowlist } from './policy.js';
 import type { BrowserActionCommand, BrowserActionResult, BrowserTab } from './protocol.js';
 
 type CdpTarget = { id?:string;targetId?:string;type?:string;title?:string;url?:string;webSocketDebuggerUrl?:string };
@@ -12,21 +13,10 @@ function safeEndpoint(value:string):string {
   return url.toString().replace(/\/$/,'');
 }
 
-function normalizedPattern(value:string):string {
-  const pattern=value.trim().toLowerCase().replace(/\.$/,'');
-  const host=pattern.startsWith('*.')?pattern.slice(2):pattern;
-  if(!host||host==='localhost'||host.endsWith('.local')||!/^[a-z0-9.-]+$/.test(host))throw new Error(`无效导航 allowlist：${value}`);
-  return pattern;
-}
-
-export function isAllowedHost(hostname:string,allowlist:readonly string[]):boolean {
-  const host=hostname.toLowerCase().replace(/\.$/,'');
-  return allowlist.some(raw=>{const pattern=normalizedPattern(raw);return pattern.startsWith('*.')?host.endsWith(`.${pattern.slice(2)}`):host===pattern;});
-}
-
 export async function assertAllowedNavigation(input:string,allowlist:readonly string[],enforceAllowlist=true):Promise<URL>{
   const url=assertPublicSourceUrl(input);
-  if(enforceAllowlist&&(!allowlist.length||!isAllowedHost(url.hostname,allowlist)))throw new Error(`导航主机不在 allowlist：${url.hostname}`);
+  const normalized=normalizeBrowserAllowlist(allowlist);
+  if(enforceAllowlist&&(!normalized.length||!isAllowedBrowserHost(url.hostname,normalized)))throw new Error(`导航主机不在 allowlist：${url.hostname}`);
   const addresses=await lookup(url.hostname,{all:true,verbatim:true});
   if(!addresses.length||addresses.some(item=>!isPublicAddress(item.address)))throw new Error(`导航域名解析到了非公网地址：${url.hostname}`);
   return url;

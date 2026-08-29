@@ -1,0 +1,51 @@
+# ThreadBeacon Roadmap
+
+This file is the source of truth for unfinished product validation. A checked item must have reproducible evidence in tests, CI, or a documented manual run.
+
+## Completed baseline
+
+- [x] Native PostgreSQL + MinIO + Spring Boot + Worker + Vite startup.
+- [x] Worker registration, source test, record persistence, report storage, search, JSON/CSV export, and job trace.
+- [x] Studio project/source creation and source-test lifecycle (`testing` → `active` or `error`).
+- [x] Skill draft creation and publication.
+- [x] TypeScript tests, Java tests, typecheck, lint, and production web build in `pnpm check`.
+
+## P0 — core local product
+
+- [x] Add a documented one-command native startup path and prerequisite checks; Docker remains optional.
+- [ ] Validate a full collection → clustering → LLM analysis → evidence report run with an external model credential.
+- [ ] Validate interval and Cron schedules: create, immediate run, pause, resume, and restart recovery.
+- [ ] Validate workflow draft, publish, run, checkpoints, source merge, gate behavior, and finalization.
+- [x] Replace raw JSON parse errors on unauthenticated API responses with a clear login/authorization state.
+
+## P1 — governed integrations
+
+- [ ] Validate browser Profile attestation and a real CDP session: open, navigate, snapshot, click/type, screenshot, and close; cover browser-login OpenCLI adapters for Bilibili, Zhihu, Weibo, X, and LinkedIn.
+- [ ] Validate Skill execution, confirmation, correction proposal, rollback, lease expiry, and restart recovery.
+- [ ] Validate personal API tokens and MCP tools, including scope enforcement and revocation.
+- [ ] Validate webhook triggers and delivery rules with retry/failure audit records.
+- [ ] Validate workspace invitations and owner/editor/viewer authorization boundaries.
+- [ ] Validate GEO official-site submission, SSRF/robots enforcement, trace artifacts, cancel, and idempotency.
+- [ ] Validate RSS, REST, and public-web source cursors and failure recovery.
+- [ ] Add Reddit comment collection and Jetstream DID-to-handle enrichment.
+- [ ] Add the authenticated creator-owned `fetchOwned` API with explicit scope and audit records.
+- [ ] Execute imported Dify code/tool/plugin nodes in an isolated sandbox before declaring them supported.
+
+## P2 — deployment and open-source release
+
+- [ ] Run the complete Docker Compose acceptance suite on a Docker-enabled host.
+- [ ] Publish Docker Buildx images for amd64 and arm64 and verify recovery on both architectures.
+- [ ] Validate Gateway dispatch and agent reconnect behavior; keep single-Gateway scope until external coordination is required.
+- [ ] Validate cluster manifests, network policies, secrets, health probes, and rolling updates.
+- [ ] Document and test PostgreSQL/MinIO backup, restore, multi-replica, high-availability, and rolling-upgrade procedures.
+- [ ] Run credentialed provider smoke tests for each documented provider without committing secrets.
+- [ ] Review the public platform catalog against the documented supported/excluded sources.
+- [ ] Complete release documentation: native quickstart, architecture limits, compatibility matrix, and troubleshooting.
+
+## Ponytail cleanup queue
+
+- [x] Replace the one-call `ml-distance` dependency with the local cosine calculation.
+- [x] Reuse browser allowlist normalization/matching instead of maintaining two implementations.
+- [x] Remove unused proxy/export helpers.
+- [ ] Decide whether to delete the unused direct `BlueskyProvider` or register it as a supported runtime path.
+- [ ] Collapse the single-implementation `GatewayCoordination` interface only if multi-Gateway coordination remains out of scope.

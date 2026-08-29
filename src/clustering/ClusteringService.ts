@@ -15,10 +15,22 @@
 import { createEmbeddingProvider, createConfigFromEnv, IEmbeddingProvider } from './EmbeddingProvider.js';
 import { DataCleaner } from './DataCleaner.js';
 import { DBSCAN } from 'density-clustering';
-import { similarity } from 'ml-distance';
 
 // 余弦距离 = 1 - 余弦相似度
-const cosineDistance = (a: number[], b: number[]) => 1 - similarity.cosine(a, b);
+const cosineDistance = (a: number[], b: number[]) => {
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let index = 0; index < Math.min(a.length, b.length); index++) {
+    const left = a[index] ?? 0;
+    const right = b[index] ?? 0;
+    dot += left * right;
+    normA += left * left;
+    normB += right * right;
+  }
+  const denominator = Math.sqrt(normA * normB);
+  return denominator === 0 ? 1 : 1 - dot / denominator;
+};
 
 /** 按下标取值并丢弃越界项。DBSCAN 返回的下标理论上都合法，这里只是不让类型系统靠假设成立。 */
 function pickByIndex<T>(source: readonly T[], indices: readonly number[]): T[] {

@@ -129,14 +129,20 @@ Last-Modified，下一轮自动发出条件请求；来源的最近成功、连�
                        S3 / MinIO 报告库
 ```
 
-本地启动管理台：
+Docker 是可选部署方式。原生启动仍需要可连接的 PostgreSQL 与 S3/MinIO；安装 Java 17+、Node 22+、
+pnpm，并按 `.env.example` 在不入库的 `.env.local` 中填写本机连接和三份独立随机密钥。先检查环境，再用一个命令
+启动 Spring Boot API、React 管理台和 Worker：
 
 ```bash
-pnpm --dir apps/control-plane web:dev
-# 另一个终端：apps/control-api/mvnw spring-boot:run
+pnpm control:doctor
+pnpm control:native
 ```
 
-配置三份独立随机密钥后，一键启动完整轻量自托管栈（控制平面 + Worker + 持久化
+默认管理台为 `http://127.0.0.1:3000`，API 为 `http://127.0.0.1:8080`；按 `Ctrl+C` 会停止本次启动的三个进程。
+环境检查会明确指出缺少 Java、PostgreSQL、MinIO 或端口冲突。若希望分别调试，也可运行
+`pnpm control:dev`、`apps/control-api/mvnw spring-boot:run` 与 `pnpm worker`。
+
+如选择容器部署，配置三份独立随机密钥后可一键启动完整轻量自托管栈（控制平面 + Worker + 持久化
 Chromium/CDP/noVNC）：
 
 ```bash

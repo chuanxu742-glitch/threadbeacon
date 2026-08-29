@@ -20,6 +20,8 @@
     "worker": "tsx src/worker.ts",
     "gateway": "tsx src/gateway.ts",
     "control:dev": "pnpm --dir apps/control-plane dev",
+    "control:doctor": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/native-control.mjs doctor",
+    "control:native": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/native-control.mjs start",
     "control:build": "pnpm --dir apps/control-plane build",
     "control:java:check": "node scripts/java-control.mjs test",
     "control:lint": "pnpm --dir apps/control-plane lint",
@@ -30,7 +32,6 @@
     "@jackwener/opencli": "1.8.5",
     "density-clustering": "^1.3.0",
     "fast-xml-parser": "^5.11.1",
-    "ml-distance": "^4.0.1",
     "openai": "^6.17.0",
     "undici": "^7.10.0",
     "ws": "^8.21.3"

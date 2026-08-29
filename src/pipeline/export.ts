@@ -135,11 +135,6 @@ export function clustersCsv(report: AnalysisReport): string {
   return toCsv(CLUSTER_HEADERS, rows);
 }
 
-/** 全量 JSON —— 报告对象原样序列化，含 provenance、items、raw 字段。 */
-export function fullJson(report: AnalysisReport): string {
-  return JSON.stringify(report, null, 2);
-}
-
 export interface ExportBundle {
   readonly 'posts.csv': string;
   readonly 'comments.csv': string;
@@ -152,6 +147,6 @@ export function buildExports(report: AnalysisReport): ExportBundle {
     'posts.csv': postsCsv(report),
     'comments.csv': commentsCsv(report),
     'clusters.csv': clustersCsv(report),
-    'full.json': fullJson(report),
+    'full.json': JSON.stringify(report, null, 2),
   };
 }
