@@ -47,5 +47,5 @@ This file is the source of truth for unfinished product validation. A checked it
 - [x] Replace the one-call `ml-distance` dependency with the local cosine calculation.
 - [x] Reuse browser allowlist normalization/matching instead of maintaining two implementations.
 - [x] Remove unused proxy/export helpers.
-- [ ] Decide whether to delete the unused direct `BlueskyProvider` or register it as a supported runtime path.
+- [x] Delete the unusable direct `BlueskyProvider`; keep the registered Jetstream runtime path.
 - [ ] Collapse the single-implementation `GatewayCoordination` interface only if multi-Gateway coordination remains out of scope.

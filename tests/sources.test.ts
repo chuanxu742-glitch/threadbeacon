@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { BlueskyProvider } from '../src/providers/bluesky.js';
 import { RedditProvider } from '../src/providers/reddit.js';
 import { YouTubeProvider } from '../src/providers/youtube.js';
 import type { AuthMode, HttpPort } from '../src/providers/http.js';
@@ -28,93 +27,6 @@ function fakeHttp(
   };
   return { port, calls };
 }
-
-const bskyPost = (text: string, createdAt: string, lang?: string) => ({
-  uri: 'at://did:plc:abc123/app.bsky.feed.post/xyz',
-  cid: 'bafyfake',
-  author: { did: 'did:plc:abc123', handle: 'someone.bsky.social', displayName: '某人' },
-  record: { text, createdAt, ...(lang ? { langs: [lang] } : {}) },
-  likeCount: 7,
-  replyCount: 2,
-  repostCount: 1,
-  quoteCount: 1,
-});
-
-describe('BlueskyProvider', () => {
-  it('抽取正文、时间与全部标识符', async () => {
-    const { port } = fakeHttp([
-      { match: 'searchPosts', reply: { posts: [bskyPost('续航太差', '2026-08-05T13:47:22Z', 'zh')] } },
-    ]);
-    const p = new BlueskyProvider({ http: port });
-
-    const bundle = await p.searchAll({ keyword: '续航', limit: 10 });
-
-    expect(bundle.items).toHaveLength(1);
-    const item = bundle.items[0]!;
-    expect(item.text).toBe('续航太差');
-    expect(item.postedAt).toBe('2026-08-05T13:47:22.000Z');
-    expect(item.timeBucket).toBe('2026-08-05');
-    expect(item.lang).toBe('zh');
-    expect(item.author).toBe('someone.bsky.social');
-    expect(item.authorId).toBe('did:plc:abc123');
-    expect(item.id).toBe('xyz');
-    expect(item.url).toBe('https://bsky.app/profile/did:plc:abc123/post/xyz');
-    expect(item.itemType).toBe('post');
-    // 转推与引用合并进 shares
-    expect(item.metrics).toEqual({ likes: 7, comments: 2, shares: 2 });
-    expect(item.raw?.['atUri']).toBe('at://did:plc:abc123/app.bsky.feed.post/xyz');
-  });
-
-  it('provenance 如实记录 open-protocol / anonymous', async () => {
-    const { port } = fakeHttp([{ match: 'searchPosts', reply: { posts: [] } }]);
-    const p = new BlueskyProvider({ http: port });
-
-    const bundle = await p.searchAll({ keyword: 'x', limit: 5 });
-    expect(bundle.provenance.kind).toBe('open-protocol');
-    expect(bundle.provenance.auth).toBe('anonymous');
-    expect(bundle.provenance.platform).toBe('bluesky');
-  });
-
-  it('跳过缺正文或缺时间的条目', async () => {
-    const { port } = fakeHttp([
-      {
-        match: 'searchPosts',
-        reply: {
-          posts: [
-            bskyPost('有效', '2026-08-05T00:00:00Z'),
-            { record: { text: '没有时间' } },
-            { record: { createdAt: '2026-08-05T00:00:00Z' } },
-          ],
-        },
-      },
-    ]);
-    const p = new BlueskyProvider({ http: port });
-
-    const bundle = await p.searchAll({ keyword: 'x', limit: 10 });
-    expect(bundle.items).toHaveLength(1);
-    expect(bundle.items[0]!.text).toBe('有效');
-  });
-
-  it('按 cursor 翻页直到攒够 limit', async () => {
-    let page = 0;
-    const { port, calls } = fakeHttp([
-      {
-        match: 'searchPosts',
-        reply: () => {
-          page += 1;
-          return page === 1
-            ? { posts: [bskyPost('a', '2026-08-05T00:00:00Z')], cursor: 'c1' }
-            : { posts: [bskyPost('b', '2026-08-05T00:00:00Z')] };
-        },
-      },
-    ]);
-    const p = new BlueskyProvider({ http: port });
-
-    const bundle = await p.searchAll({ keyword: 'x', limit: 2 });
-    expect(bundle.items.map((i) => i.text)).toEqual(['a', 'b']);
-    expect(calls[1]).toContain('cursor=c1');
-  });
-});
 
 describe('RedditProvider', () => {
   const deps = { clientId: 'id', clientSecret: 'secret' };
