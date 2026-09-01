@@ -1,0 +1,243 @@
+# Capability exposure matrix for ThreadBeacon product decisions.
+# owner_ui: daily user-facing operation
+# setup_status: visible readiness and setup entry, not raw runtime detail
+# studio_binding: configured through project/workflow context
+# machine_ingress: external systems, workers, or agents call this directly
+# internal_only: runtime/control-plane detail, not navigation material
+# retire: compatibility surface that should be removed or migrated later
+
+capabilities:
+  - id: dashboard_overview
+    endpoints:
+      - GET /api/dashboard
+    exposure: owner_ui
+    product_area: today
+    user_language: 今天 / 待处理 / 最近成果
+    notes: "首页只展示系统脉搏、阻塞项和报告入口，不展开 raw runtime。"
+
+  - id: platform_catalog
+    endpoints:
+      - GET /api/platforms
+      - GET /api/v1/capabilities
+    exposure: setup_status
+    product_area: sources
+    user_language: 来源能力就绪度
+    notes: "目录存在不等于可运行；需要叠加 Worker、key、Profile 和验收状态。"
+
+  - id: quick_jobs
+    endpoints:
+      - GET /api/jobs
+      - POST /api/jobs
+      - GET /api/jobs/{id}
+      - PATCH /api/jobs/{id}
+      - GET /api/jobs/{id}/events
+    exposure: owner_ui
+    product_area: today
+    user_language: 最近运行 / 快速采集
+    notes: "可保留作为快速入口，但主路径应逐步迁到项目流程运行。"
+
+  - id: worker_job_protocol
+    endpoints:
+      - POST /api/worker/claim
+      - POST /api/worker/jobs/{id}/complete
+      - POST /api/worker/jobs/{id}/fail
+    exposure: machine_ingress
+    product_area: execution
+    user_language: Worker 执行协议
+    notes: "不做普通人工按钮，只在执行节点详情显示健康摘要。"
+
+  - id: records_and_exports
+    endpoints:
+      - GET /api/records
+      - GET /api/v1/records
+      - GET /api/exports
+    exposure: owner_ui
+    product_area: evidence
+    user_language: 数据记录 / 证据材料 / 导出
+    notes: "记录中心可以给研究员用；raw_json 应折叠为高级信息。"
+
+  - id: report_artifacts
+    endpoints:
+      - GET /api/reports/{id}
+    exposure: owner_ui
+    product_area: reports
+    user_language: 报告详情
+    notes: "报告页优先渲染摘要、发现和证据，JSON 下载作为高级操作。"
+
+  - id: schedules
+    endpoints:
+      - GET /api/schedules
+      - POST /api/schedules
+      - PATCH /api/schedules/{id}
+    exposure: owner_ui
+    product_area: automation
+    user_language: 定时追踪
+    notes: "项目流程发布后再创建计划；暂停和失败进入今天页待处理。"
+
+  - id: studio_project_sources
+    endpoints:
+      - GET /api/studio
+      - POST /api/studio action=create-project
+      - POST /api/studio action=create-source
+      - POST /api/studio action=test-source
+    exposure: owner_ui
+    product_area: projects
+    user_language: 项目 / 来源 / 试运行
+    notes: "项目创建应从研究问题和模板开始，来源试运行给出可行动错误。"
+
+  - id: browser_profile_setup
+    endpoints:
+      - POST /api/studio action=create-browser-profile
+    exposure: setup_status
+    product_area: system
+    user_language: 来源账号授权
+    notes: "普通用户看到授权状态；管理员才看到 Profile kind、Worker 绑定和证明状态。"
+
+  - id: workflow_lifecycle
+    endpoints:
+      - GET /api/workflows
+      - POST /api/workflows
+      - GET /api/workflows/{id}
+      - PATCH /api/workflows/{id}
+      - GET /api/workflows/runs/{id}
+    exposure: studio_binding
+    product_area: projects
+    user_language: 研究流程
+    notes: "默认线性流程，高级入口展示 DAG；运行必须绑定已发布版本。"
+
+  - id: governance_delivery
+    endpoints:
+      - GET /api/governance
+      - POST /api/governance
+      - PATCH /api/governance/delivery/{id}
+    exposure: owner_ui
+    product_area: delivery
+    user_language: 自动交付 / 审计日志
+    notes: "交付失败进入待处理；技术提交结果和业务送达结果要分层。"
+
+  - id: browser_automation_ui
+    endpoints:
+      - GET /api/browser
+      - POST /api/browser
+      - PATCH /api/browser/sessions/{id}
+      - POST /api/browser/sessions/{id}/actions
+      - GET /api/browser/actions/{id}/screenshot
+    exposure: setup_status
+    product_area: system
+    user_language: 受控浏览器会话
+    notes: "这是管理员/自动化负责人的能力，不进入研究员首要路径。"
+
+  - id: browser_worker_protocol
+    endpoints:
+      - POST /api/browser/worker/claim
+      - POST /api/browser/worker/actions/{id}/complete
+      - POST /api/browser/worker/actions/{id}/fail
+    exposure: machine_ingress
+    product_area: execution
+    user_language: 浏览器 Worker 协议
+    notes: "只给 Worker 调用，UI 只消费结果和审计。"
+
+  - id: skills
+    endpoints:
+      - GET /api/skills
+      - POST /api/skills
+      - GET /api/skills/{id}
+      - POST /api/skills/{id}/publish
+      - POST /api/skills/{id}/runs
+      - GET /api/skills/runs/{runId}
+      - POST /api/skills/runs/{runId}/reviews/{reviewId}/approve
+      - POST /api/skills/runs/{runId}/reviews/{reviewId}/reject
+      - POST /api/skills/{skillId}/corrections/{correctionId}/apply
+      - POST /api/skills/{skillId}/corrections/{correctionId}/dismiss
+      - POST /api/skills/{skillId}/corrections/{correctionId}/rollback
+    exposure: owner_ui
+    product_area: automation
+    user_language: 自动化助手 / 待确认 / 纠错
+    notes: "默认展示模板和运行证据；九要素编辑放高级入口。"
+
+  - id: skill_worker_protocol
+    endpoints:
+      - POST /api/worker/skills/claim
+      - POST /api/worker/skills/{runId}/pause
+      - POST /api/worker/skills/{runId}/complete
+      - POST /api/worker/skills/{runId}/fail
+    exposure: machine_ingress
+    product_area: execution
+    user_language: Skill Worker 协议
+    notes: "机器入口，风险确认通过 Team Inbox 暴露给人。"
+
+  - id: access_workspaces
+    endpoints:
+      - GET /api/access/workspaces
+      - POST /api/access/invitations/accept
+      - GET /api/admin/access
+      - POST /api/admin/access
+      - PATCH /api/admin/access
+    exposure: owner_ui
+    product_area: system
+    user_language: 工作区 / 成员 / 邀请
+    notes: "团队版 P0；viewer 写操作禁用并说明原因。"
+
+  - id: developer_tokens_mcp
+    endpoints:
+      - GET /api/integrations/tokens
+      - POST /api/integrations/tokens
+      - PATCH /api/integrations/tokens
+      - GET /api/mcp
+      - POST /api/mcp
+    exposure: machine_ingress
+    product_area: system
+    user_language: 开发者接口 / 外部工具连接
+    notes: "管理员配置；PAT 明文只显示一次，所有 MCP 调用进审计。"
+
+  - id: webhook_triggers
+    endpoints:
+      - GET /api/integrations/webhooks
+      - POST /api/integrations/webhooks
+      - PATCH /api/integrations/webhooks
+      - POST /api/integrations/webhooks/{token}
+    exposure: machine_ingress
+    product_area: automation
+    user_language: Webhook 触发器
+    notes: "创建和状态可在 UI 管理；token 触发 URL 是机器入口。"
+
+  - id: dify_import
+    endpoints:
+      - GET /api/integrations/dify
+      - POST /api/integrations/dify
+      - POST /api/integrations/dify/import
+    exposure: studio_binding
+    product_area: automation
+    user_language: 导入 Dify 流程
+    notes: "阻断节点是安全结果；导入后进入流程草稿，不保证直接可运行。"
+
+  - id: creator_owned_acquisition
+    endpoints:
+      - POST /api/v1/owned-acquisitions
+      - GET /api/v1/owned-acquisitions/{jobId}
+    exposure: machine_ingress
+    product_area: sources
+    user_language: 自有账号数据获取
+    notes: "只用于授权自有资产；必须有 scope、审计和项目绑定。"
+
+  - id: geo_internal_acquisition
+    endpoints:
+      - GET /api/v1/internal/geo-acquisition/capabilities
+      - POST /api/v1/internal/geo-acquisition/executions
+      - GET /api/v1/internal/geo-acquisition/executions/{id}
+      - POST /api/v1/internal/geo-acquisition/executions/{id}/cancel
+    exposure: machine_ingress
+    product_area: automation
+    user_language: GEO 官网观测
+    notes: "产品上可作为模板能力，API 本身保持内部/兼容桥接入口。"
+
+  - id: system_health_openapi
+    endpoints:
+      - GET /api/health
+      - GET /api/openapi
+      - GET /api/auth/methods
+      - GET /api/auth/me
+    exposure: setup_status
+    product_area: system
+    user_language: 系统状态 / 登录方式 / API 文档
+    notes: "用于系统状态、登录页和开发者文档，不进入研究项目主路径。"

@@ -580,6 +580,7 @@ async function executeJob(job: ControlJob, catalog: readonly OpenCliCommand[]): 
       keyword: job.keyword,
       limit: job.limit,
       includeComments: job.include_comments !== 0,
+      ...(options['playbookKey'] === 'competitive-research' ? { researchMethod: 'competitive-research' as const } : {}),
     },
   );
   const provider = registry.resolve(job.platform, 'searchAll');

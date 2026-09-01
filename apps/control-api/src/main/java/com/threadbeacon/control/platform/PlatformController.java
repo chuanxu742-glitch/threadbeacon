@@ -23,6 +23,7 @@ public class PlatformController {
     @PatchMapping("/workflows/{id}") ResponseEntity<Map<String,Object>> workflowAction(@PathVariable String id,@RequestBody Map<String,Object> body){user.requireScope("workflows:run");var action=text(body.get("action"));if("publish".equals(action))return ResponseEntity.ok(Map.of("version",platform.publish(user.ownerId(),id)));if("run".equals(action))return ResponseEntity.status(HttpStatus.CREATED).body(platform.run(user.ownerId(),id));return ResponseEntity.ok(Map.of("workflow",platform.saveWorkflow(user.ownerId(),id,body)));}
     @GetMapping("/workflows/runs/{id}") Map<String,Object> run(@PathVariable String id){user.requireScope("runs:read");return platform.runDetails(user.ownerId(),id);}
     @GetMapping("/governance") Map<String,Object> governance(){return platform.governance(user.ownerId());}
+    @GetMapping("/product-metrics") Map<String,Object> productMetrics(@RequestParam(required=false) String projectId){return platform.productMetrics(user.ownerId(),projectId);}
     @PostMapping("/governance") ResponseEntity<Map<String,Object>> rule(@RequestBody Map<String,Object> body){return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("rule",platform.createRule(user.ownerId(),body)));}
     @PatchMapping("/governance/delivery/{id}") Map<String,Object> toggle(@PathVariable String id){platform.toggleRule(user.ownerId(),id);return Map.of("ok",true);}
 }

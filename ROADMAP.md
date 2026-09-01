@@ -2,6 +2,20 @@
 
 This file is the source of truth for unfinished product validation. A checked item must have reproducible evidence in tests, CI, or a documented manual run.
 
+## P0 — product validation gate
+
+Do not expand platform count, generic workflow nodes, Skill machinery, or cluster deployment scope until this gate has evidence. The product thesis and thresholds are documented in `docs/深度产品研究与战略决策.md`.
+
+- [ ] Complete 12 problem interviews for recurring competitive research and document the evidence against the stated thresholds.
+- [ ] Recruit 3 design partners using real sources and real weekly deliverables.
+- [ ] Carry project identity through jobs, workflow runs, observations, findings, reports, and deliveries.
+- [ ] Preserve immutable source observations with content hashes instead of overwriting the only stored copy.
+- [ ] Make the competitive-research template execute a real baseline/delta/finding method rather than storing a template label.
+- [ ] Add finding review: approve, edit, reject, rationale, reviewer, and timestamp.
+- [ ] Deliver a readable report with precise evidence references, method/version metadata, uncertainties, and approved findings only.
+- [ ] Instrument the activation funnel from ready workspace to a second delivered report.
+- [ ] Pass the 2-week design-partner success thresholds before resuming horizontal expansion.
+
 ## Completed baseline
 
 - [x] Native PostgreSQL + MinIO + Spring Boot + Worker + Vite startup.

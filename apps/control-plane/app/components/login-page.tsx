@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from 'react';
 
-export function LoginPage({onLogin,localEnabled,oidcEnabled}:{
+export function LoginPage({onLogin,localEnabled,oidcEnabled,oidcUrl}:{
   onLogin:(username:string,password:string)=>Promise<void>;
   localEnabled:boolean;
   oidcEnabled:boolean;
+  oidcUrl?:string;
 }) {
   const [busy,setBusy]=useState(false),[error,setError]=useState(''),[showPassword,setShowPassword]=useState(false);
   async function submit(event:FormEvent<HTMLFormElement>){event.preventDefault();setBusy(true);setError('');const data=new FormData(event.currentTarget);try{await onLogin(String(data.get('username')??''),String(data.get('password')??''));}catch(reason){setError(reason instanceof Error?reason.message:'登录失败，请稍后重试。');}finally{setBusy(false);}}
@@ -17,7 +18,7 @@ export function LoginPage({onLogin,localEnabled,oidcEnabled}:{
     </section>
     <section className="login-panel">
       <form className="login-form" onSubmit={submit}>
-        <div className="login-form-head"><span className="mobile-brand">TB</span><p className="eyebrow">WELCOME BACK</p><h2>登录控制台</h2><p>{localEnabled?'使用部署时配置的本地管理员账号。':'通过部署方配置的企业身份登录。'}</p></div>
+        <div className="login-form-head"><span className="mobile-brand">TB</span><p className="eyebrow">WELCOME BACK</p><h2>回到团队工作台</h2><p>{localEnabled?'使用部署时配置的个人账号。':'通过部署方配置的身份登录。'}</p></div>
         {error&&<div className="login-error" role="alert"><span>!</span>{error}</div>}
         {localEnabled&&<>
           <label>用户名<input name="username" autoComplete="username" required autoFocus placeholder="请输入用户名"/></label>
@@ -27,9 +28,9 @@ export function LoginPage({onLogin,localEnabled,oidcEnabled}:{
         </>}
         {oidcEnabled&&<>
           {localEnabled&&<div className="login-divider"><span>企业身份</span></div>}
-          <a className="oidc-login" href="/oauth2/authorization/threadbeacon">使用企业 OIDC 登录 <span>→</span></a>
+          <a className="oidc-login" href={oidcUrl??'/oauth2/authorization/threadbeacon'}>使用企业 OIDC 登录 <span>→</span></a>
         </>}
-        {!localEnabled&&!oidcEnabled&&<div className="login-error" role="alert"><span>!</span>当前部署没有启用可用的登录方式，请联系管理员检查认证配置。</div>}
+        {!localEnabled&&!oidcEnabled&&<div className="login-error" role="alert"><span>!</span>当前部署没有启用可用的登录方式，请检查认证配置。</div>}
       </form>
       <footer><span>Apache-2.0 开源</span><a href="/about">产品说明</a><a href="https://github.com/chuanxu742-glitch/threadbeacon" target="_blank" rel="noreferrer">GitHub ↗</a></footer>
     </section>

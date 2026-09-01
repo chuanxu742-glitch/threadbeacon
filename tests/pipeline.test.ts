@@ -110,6 +110,22 @@ describe('analyze 端到端', () => {
     expect(report.keyword).toBe('x');
   });
 
+  it('竞品研究方法使用变化导向的 Finding 提示词', async () => {
+    let system = '';
+    const report = await analyze(
+      deps(
+        fakeLlm((request) => {
+          system = request.system ?? '';
+          return goodJson('定价变化');
+        }),
+      ),
+      { ...req, researchMethod: 'competitive-research' },
+    );
+    expect(report.painPoints).toHaveLength(2);
+    expect(system).toContain('竞品研究分析师');
+    expect(system).toContain('变化信号');
+  });
+
   it('产物保留全量原始记录与标识符', async () => {
     const llm = fakeLlm((r) => goodJson(r.messages[0]!.content.includes('续航') ? '续航' : '价格'));
     const report = await analyze(deps(llm), req);

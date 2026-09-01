@@ -63,4 +63,34 @@ class MigrationGovernanceTest {
         assertThat(sql).contains("ADD COLUMN attempt INTEGER", "idx_delivery_logs_rule_job_attempt");
         assertThat(sql).doesNotContain("PRAGMA");
     }
+
+    @Test
+    void projectResearchMigrationAddsImmutableObservationsAndFindingReviews() throws Exception {
+        var resource = getClass().getResourceAsStream("/db/migration/V5__project_observations_and_finding_reviews.sql");
+        assertThat(resource).isNotNull();
+        var sql = new String(resource.readAllBytes(), StandardCharsets.UTF_8);
+        assertThat(sql).contains(
+                "ALTER TABLE jobs ADD COLUMN project_id",
+                "ALTER TABLE reports ADD COLUMN workflow_run_id",
+                "CREATE TABLE observations",
+                "content_hash TEXT NOT NULL",
+                "change_type TEXT NOT NULL",
+                "CREATE TABLE finding_reviews",
+                "action TEXT NOT NULL CHECK (action IN ('approve','edit','reject'))");
+        assertThat(sql).doesNotContain("PRAGMA");
+    }
+
+    @Test
+    void projectDeliveryMetricsMigrationAddsScopedDeliveryAndFunnelTelemetry() throws Exception {
+        var resource = getClass().getResourceAsStream("/db/migration/V6__project_delivery_metrics_and_finding_quality.sql");
+        assertThat(resource).isNotNull();
+        var sql = new String(resource.readAllBytes(), StandardCharsets.UTF_8);
+        assertThat(sql).contains(
+                "ALTER TABLE delivery_rules ADD COLUMN project_id",
+                "ALTER TABLE delivery_logs ADD COLUMN project_id",
+                "uncertainties_json TEXT NOT NULL",
+                "CREATE TABLE product_events",
+                "second_report_delivered");
+        assertThat(sql).doesNotContain("PRAGMA");
+    }
 }

@@ -2,7 +2,6 @@ package com.threadbeacon.control.job;
 
 import com.threadbeacon.control.common.CurrentUser;
 import com.threadbeacon.control.node.NodeService;
-import com.threadbeacon.control.storage.ObjectStore;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -10,7 +9,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -25,11 +23,10 @@ public class JobController {
     private final JobService jobs;
     private final NodeService nodes;
     private final CurrentUser user;
-    private final ObjectStore objects;
     private final ObjectMapper mapper;
 
-    public JobController(JobService jobs, NodeService nodes, CurrentUser user, ObjectStore objects, ObjectMapper mapper) {
-        this.jobs = jobs; this.nodes = nodes; this.user = user; this.objects = objects; this.mapper = mapper;
+    public JobController(JobService jobs, NodeService nodes, CurrentUser user, ObjectMapper mapper) {
+        this.jobs = jobs; this.nodes = nodes; this.user = user; this.mapper = mapper;
     }
 
     @GetMapping("/jobs") Map<String,Object> list(@RequestParam(defaultValue="50") int limit){return Map.of("jobs",jobs.list(user.ownerId(),limit));}
@@ -44,7 +41,11 @@ public class JobController {
 
     @GetMapping({"/records","/v1/records"}) Map<String,Object> records(@RequestParam(defaultValue="") String search,@RequestParam(defaultValue="") String platform,@RequestParam(defaultValue="50") int limit,@RequestParam(defaultValue="0") int offset){user.requireScope("records:read");var query=search.trim();var source=platform.trim();var result=new LinkedHashMap<String,Object>();result.put("records",jobs.records(user.ownerId(),query,source,limit,offset));result.put("total",jobs.recordCount(user.ownerId(),query,source));return result;}
     @GetMapping("/exports") void export(@RequestParam(defaultValue="json") String format,@RequestParam(defaultValue="") String search,@RequestParam(defaultValue="") String platform,HttpServletResponse response) throws Exception {user.requireScope("records:read");var records=jobs.exportRecords(user.ownerId(),search.trim(),platform.trim());response.setHeader("Cache-Control","private, no-store");if("csv".equalsIgnoreCase(format)){response.setContentType("text/csv;charset=UTF-8");response.setHeader("Content-Disposition","attachment; filename=threadbeacon-records.csv");var columns=List.of("id","platform","source_item_id","item_type","title","content","author","url","observed_at","duplicate_count");var csv=new StringBuilder(String.join(",",columns)).append('\n');for(var record:records){for(int index=0;index<columns.size();index++){if(index>0)csv.append(',');csv.append(csv(record.get(columns.get(index))));}csv.append('\n');}response.getOutputStream().write(csv.toString().getBytes(StandardCharsets.UTF_8));return;}response.setContentType("application/json");response.setHeader("Content-Disposition","attachment; filename=threadbeacon-records.json");mapper.writeValue(response.getOutputStream(),Map.of("records",records,"total",records.size()));}
-    @GetMapping("/reports/{id}") void report(@PathVariable String id,HttpServletResponse response) throws Exception {user.requireScope("records:read");var meta=jobs.reportMeta(user.ownerId(),id);response.setContentType("application/json");response.setHeader("Cache-Control","private, no-store");try(InputStream input=objects.get(text(meta.get("object_key")))){input.transferTo(response.getOutputStream());}}
+    @GetMapping("/reports/{id}") Map<String,Object> report(@PathVariable String id){user.requireScope("records:read");return jobs.report(user.ownerId(),id);}
+
+    @GetMapping("/findings") Map<String,Object> findings(@RequestParam(defaultValue="") String projectId){user.requireScope("records:read");return Map.of("findings",jobs.findings(user.ownerId(),projectId));}
+    @PostMapping("/findings/{id}/review") Map<String,Object> reviewFinding(@PathVariable String id,@RequestBody Map<String,Object> body){user.requireScope("records:read");user.requireRole("editor");return Map.of("finding",jobs.reviewFinding(user.ownerId(),user.userId(),id,body));}
+    @GetMapping("/observations") Map<String,Object> observations(@RequestParam(defaultValue="") String projectId,@RequestParam(defaultValue="200") int limit){user.requireScope("records:read");return Map.of("observations",jobs.observations(user.ownerId(),projectId,limit));}
 
     private String csv(Object value){var text=value==null?"":String.valueOf(value);return "\""+text.replace("\"","\"\"")+"\"";}
     @SuppressWarnings("unchecked") private Map<String,Object> object(Object value){return value instanceof Map<?,?> map?(Map<String,Object>)map:Map.of();}

@@ -5,6 +5,7 @@ import com.threadbeacon.control.common.SecretBox;
 import com.threadbeacon.control.node.WorkerNode;
 import com.threadbeacon.control.platform.WorkflowRuntimeService;
 import com.threadbeacon.control.platform.DeliveryService;
+import com.threadbeacon.control.platform.ProductEventService;
 import com.threadbeacon.control.storage.ObjectStore;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,10 +35,11 @@ public class JobService {
     private final ObjectStore objects;
     private final WorkflowRuntimeService workflowRuntime;
     private final DeliveryService deliveries;
+    private final ProductEventService productEvents;
     private final SecretBox secrets;
 
     public JobService(JdbcTemplate jdbc, TransactionTemplate transactions, ObjectMapper mapper, ObjectStore objects,
-                      WorkflowRuntimeService workflowRuntime, DeliveryService deliveries, SecretBox secrets) {
+                      WorkflowRuntimeService workflowRuntime, DeliveryService deliveries, SecretBox secrets, ProductEventService productEvents) {
         this.jdbc = jdbc;
         this.transactions = transactions;
         this.mapper = mapper;
@@ -44,6 +47,7 @@ public class JobService {
         this.workflowRuntime = workflowRuntime;
         this.deliveries = deliveries;
         this.secrets = secrets;
+        this.productEvents = productEvents;
     }
 
     public Map<String, Object> create(String ownerId, Map<String, Object> input) {
@@ -60,6 +64,16 @@ public class JobService {
         if (limit < 1 || limit > 1000) throw new ApiException(HttpStatus.BAD_REQUEST, "limit 必须是 1-1000");
         if (priority < -10 || priority > 10) throw new ApiException(HttpStatus.BAD_REQUEST, "priority 必须是 -10 到 10");
         Map<String, Object> options = internalOptions == null ? new LinkedHashMap<>() : new LinkedHashMap<>(internalOptions);
+        var projectId = text(options.getOrDefault("projectId", input.get("projectId")));
+        if (!projectId.isBlank()) {
+            if (jdbc.queryForObject("SELECT count(*) FROM projects WHERE id=? AND owner_id=?", Integer.class, projectId, ownerId) != 1) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "项目不存在");
+            }
+            options.put("projectId", projectId);
+            var project = jdbc.queryForMap("SELECT playbook_key,playbook_version FROM projects WHERE id=? AND owner_id=?", projectId, ownerId);
+            options.put("playbookKey", project.get("playbook_key"));
+            options.put("playbookVersion", project.get("playbook_version"));
+        }
         var command = text(input.get("opencliCommand"));
         if (!command.isBlank()) {
             if (!platform.startsWith("opencli:")) throw new ApiException(HttpStatus.BAD_REQUEST, "只有 OpenCLI 平台可以指定命令");
@@ -73,9 +87,9 @@ public class JobService {
         }
         var jobId = id(); var timestamp = now();
         jdbc.update("""
-            INSERT INTO jobs(id,owner_id,platform,keyword,source_options_json,"limit",include_comments,status,progress,priority,attempt,max_attempts,created_at,updated_at)
-            VALUES(?,?,?,?,?,?,?,'queued',0,?,0,3,?,?)
-            """, jobId, ownerId, platform, keyword, json(mapper, options), limit, bool(input.get("includeComments"), true) ? 1 : 0, priority, timestamp, timestamp);
+            INSERT INTO jobs(id,owner_id,platform,keyword,source_options_json,project_id,"limit",include_comments,status,progress,priority,attempt,max_attempts,created_at,updated_at)
+            VALUES(?,?,?,?,?,?,?,?,'queued',0,?,0,3,?,?)
+            """, jobId, ownerId, platform, keyword, json(mapper, options), nullable(projectId), limit, bool(input.get("includeComments"), true) ? 1 : 0, priority, timestamp, timestamp);
         event(jobId, "queued", "任务已进入等待队列", timestamp);
         if (platform.equals("geo") && !options.containsKey("managedAcquisition")) {
             jdbc.update("""
@@ -181,28 +195,43 @@ public class JobService {
     }
 
     private Map<String, Object> completeTransaction(WorkerNode node, String jobId, Map<String, Object> report, String objectKey) {
-        var jobs = jdbc.queryForList("SELECT owner_id,platform,keyword,attempt,source_options_json FROM jobs WHERE id=? AND assigned_node_id=? AND status='running' FOR UPDATE", jobId, node.id());
+        var jobs = jdbc.queryForList("""
+            SELECT j.owner_id,j.platform,j.keyword,j.attempt,j.source_options_json,j.project_id,j.workflow_run_id,
+                   COALESCE(p.playbook_key,'generic-research') AS playbook_key,
+                   COALESCE(p.playbook_version,'1.0') AS playbook_version
+            FROM jobs j LEFT JOIN projects p ON p.id=j.project_id
+            WHERE j.id=? AND j.assigned_node_id=? AND j.status='running' FOR UPDATE OF j
+            """, jobId, node.id());
         if (jobs.isEmpty()) throw new ApiException(HttpStatus.CONFLICT, "任务租约已经失效");
-        var job = jobs.get(0); var ownerId = text(job.get("owner_id")); var platform = text(job.get("platform")); var timestamp = now();
+        var job = jobs.get(0); var ownerId = text(job.get("owner_id")); var platform = text(job.get("platform"));
+        var projectId = text(job.get("project_id")); var workflowRunId = text(job.get("workflow_run_id")); var timestamp = now();
         var items = array(report.get("items")); var painPoints = array(report.get("painPoints")); var reportId = id();
-        jdbc.update("""
-            INSERT INTO reports(id,job_id,owner_id,object_key,item_count,pain_point_count,generated_at,created_at)
-            VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET object_key=excluded.object_key,item_count=excluded.item_count,pain_point_count=excluded.pain_point_count,generated_at=excluded.generated_at
-            """, reportId, jobId, ownerId, objectKey, items.size(), painPoints.size(), timestamp, timestamp);
         var recordIds = new ArrayList<String>();
-        for (var value : items) recordIds.add(persistRecord(ownerId, platform, jobId, timestamp, object(value)));
-        var summary = items.size() + " 条数据，" + painPoints.size() + " 个痛点";
+        for (var value : items) recordIds.add(persistRecord(ownerId, platform, projectId, workflowRunId, jobId, timestamp, object(value)));
+        var observationCounts = observationCounts(jobId);
+        jdbc.update("""
+            INSERT INTO reports(id,job_id,owner_id,project_id,workflow_run_id,object_key,item_count,pain_point_count,method_key,method_version,observation_count,baseline_count,new_count,changed_count,unchanged_count,generated_at,created_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET project_id=excluded.project_id,workflow_run_id=excluded.workflow_run_id,object_key=excluded.object_key,item_count=excluded.item_count,pain_point_count=excluded.pain_point_count,method_key=excluded.method_key,method_version=excluded.method_version,observation_count=excluded.observation_count,baseline_count=excluded.baseline_count,new_count=excluded.new_count,changed_count=excluded.changed_count,unchanged_count=excluded.unchanged_count,generated_at=excluded.generated_at
+            """, reportId, jobId, ownerId, nullable(projectId), nullable(workflowRunId), objectKey, items.size(), painPoints.size(),
+                text(job.get("playbook_key")), text(job.get("playbook_version")), items.size(), observationCounts.get("baseline"), observationCounts.get("new"), observationCounts.get("changed"), observationCounts.get("unchanged"), timestamp, timestamp);
+        reportId = text(jdbc.queryForMap("SELECT id FROM reports WHERE job_id=?", jobId).get("id"));
+        var summary = items.size() + " 条数据，" + painPoints.size() + " 个候选发现";
         var changed = jdbc.update("UPDATE jobs SET status='completed',progress=100,result_summary=?,last_error=NULL,finished_at=?,updated_at=? WHERE id=? AND assigned_node_id=? AND status='running'", summary, timestamp, timestamp, jobId, node.id());
         if (changed != 1) throw new ApiException(HttpStatus.CONFLICT, "任务租约已经失效");
         event(jobId, "completed", summary, timestamp);
         completeWorkflowSource(jobId, report, timestamp);
-        persistEvidence(ownerId, jobId, reportId, painPoints, recordIds, timestamp);
+        var candidateCount = persistEvidence(ownerId, projectId, workflowRunId, jobId, reportId, painPoints, recordIds, timestamp, text(job.get("playbook_key")), observationCounts);
+        jdbc.update("UPDATE reports SET pain_point_count=? WHERE id=?", candidateCount, reportId);
+        if (!projectId.isBlank() && observationCounts.getOrDefault("baseline", 0) > 0) {
+            productEvents.track(ownerId, "baseline_completed", projectId, "report", reportId, Map.of("observationCount", items.size()));
+        }
         var options = object(parse(mapper, job.get("source_options_json"), Map.of()));
         var projectSourceId = text(options.get("sourceId"));
         if (bool(options.get("sourceTest"), false) && !projectSourceId.isBlank()) {
             jdbc.update("UPDATE project_sources SET status='active',updated_at=? WHERE id=? AND owner_id=?", timestamp, projectSourceId, ownerId);
             jdbc.update("UPDATE project_source_cursors SET cursor_json=?,last_success_at=?,last_job_id=?,consecutive_failures=0,last_error=NULL,updated_at=? WHERE source_id=? AND owner_id=?",
                     json(mapper, object(report.get("sourceCursor"))), timestamp, jobId, timestamp, projectSourceId, ownerId);
+            productEvents.track(ownerId, "source_ready", projectId, "project_source", projectSourceId, Map.of("jobId", jobId));
         }
         if (platform.equals("geo")) {
             var geo = object(report.get("geoAcquisition"));
@@ -212,7 +241,7 @@ public class JobService {
                 WHERE job_id=? AND lease_owner=? AND status='running'
                 """, json(mapper, geo.isEmpty() ? report : geo), "s3://" + objectKey + "#geoTrace", json(mapper, trace == null ? List.of() : List.of(Map.of("kind", "trace", "ref", "s3://" + objectKey + "#geoTrace"))), timestamp, timestamp, jobId, node.id());
         }
-        var completed=new LinkedHashMap<String,Object>();completed.put("id",reportId);completed.put("job_id",jobId);completed.put("owner_id",ownerId);completed.put("object_key",objectKey);completed.put("item_count",items.size());completed.put("pain_point_count",painPoints.size());completed.put("generated_at",timestamp);completed.put("platform",platform);completed.put("keyword",text(job.get("keyword")));return completed;
+         var completed=new LinkedHashMap<String,Object>();completed.put("id",reportId);completed.put("job_id",jobId);completed.put("owner_id",ownerId);completed.put("project_id",nullable(projectId));completed.put("workflow_run_id",nullable(workflowRunId));completed.put("object_key",objectKey);completed.put("item_count",items.size());completed.put("pain_point_count",candidateCount);completed.put("method_key",text(job.get("playbook_key")));completed.put("method_version",text(job.get("playbook_version")));completed.put("observation_count",items.size());completed.put("baseline_count",observationCounts.get("baseline"));completed.put("new_count",observationCounts.get("new"));completed.put("changed_count",observationCounts.get("changed"));completed.put("unchanged_count",observationCounts.get("unchanged"));completed.put("generated_at",timestamp);completed.put("platform",platform);completed.put("keyword",text(job.get("keyword")));return completed;
     }
 
     public Map<String, Object> fail(WorkerNode node, String jobId, String message) {
@@ -279,12 +308,137 @@ public class JobService {
         return rows.get(0);
     }
 
-    private String persistRecord(String ownerId, String platform, String jobId, String timestamp, Map<String, Object> item) {
+    public Map<String, Object> report(String ownerId, String reportId) {
+        var meta = reportMeta(ownerId, reportId);
+        try (var input = objects.get(text(meta.get("object_key")))) {
+            var result = mapper.readValue(input, new TypeReference<Map<String, Object>>() {});
+            var findings = jdbc.queryForList("""
+                SELECT e.*,COALESCE((SELECT count(*) FROM evidence_links l WHERE l.evidence_id=e.id),0) AS linked_count
+                FROM evidence e WHERE e.owner_id=? AND e.report_id=? AND e.review_status='approved'
+                ORDER BY e.created_at
+                """, ownerId, reportId);
+            var jobId = text(meta.get("job_id"));
+            for (var finding : findings) {
+                finding.put("evidenceRefs", jdbc.queryForList("""
+                    SELECT o.id AS observation_id,o.content_hash,o.observed_at,o.captured_at,o.source_url,
+                           r.id AS record_id,r.title,r.content,r.url
+                    FROM evidence_links l
+                    JOIN observations o ON o.record_id=l.record_id AND o.job_id=?
+                    JOIN records r ON r.id=o.record_id
+                    WHERE l.evidence_id=? ORDER BY o.captured_at
+                    """, jobId, finding.get("id")));
+            }
+            var candidates = jdbc.queryForObject("SELECT count(*) FROM evidence WHERE owner_id=? AND report_id=?", Integer.class, ownerId, reportId);
+            result.remove("painPoints");
+            result.put("findings", findings);
+            result.put("candidateFindingCount", candidates == null ? 0 : candidates);
+            var candidateCount = candidates == null ? 0 : candidates;
+            result.put("reviewStatus", candidateCount == 0 ? "empty" : findings.isEmpty() ? "pending_review" : "approved");
+            result.put("reportId", reportId);
+            result.put("projectId", meta.get("project_id"));
+            result.put("workflowRunId", meta.get("workflow_run_id"));
+            result.put("method", Map.of("key", text(meta.get("method_key")), "version", text(meta.get("method_version"))));
+            result.put("observationSummary", Map.of(
+                    "total", integer(meta.get("observation_count"), 0),
+                    "baseline", integer(meta.get("baseline_count"), 0),
+                    "new", integer(meta.get("new_count"), 0),
+                    "changed", integer(meta.get("changed_count"), 0),
+                    "unchanged", integer(meta.get("unchanged_count"), 0)));
+            var sourceCount = jdbc.queryForObject("SELECT count(DISTINCT platform) FROM observations WHERE job_id=?", Integer.class, jobId);
+            var citationCount = findings.stream().mapToInt(finding -> ((List<?>) finding.getOrDefault("evidenceRefs", List.of())).size()).sum();
+            result.put("analysisMode", "competitive-research".equals(text(meta.get("method_key")))
+                    ? (integer(meta.get("baseline_count"), 0) > 0 ? "baseline" : "delta")
+                    : "snapshot");
+            result.put("quality", Map.of(
+                    "dataQuality", String.valueOf(result.getOrDefault("dataQuality", "unknown")),
+                    "sourceCount", sourceCount == null ? 0 : sourceCount,
+                    "candidateFindingCount", candidateCount,
+                    "approvedFindingCount", findings.size(),
+                    "citationCount", citationCount));
+            return result;
+        } catch (ApiException error) {
+            throw error;
+        } catch (Exception error) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "报告读取失败");
+        }
+    }
+
+    public List<Map<String, Object>> findings(String ownerId, String projectId) {
+        var filter = projectId == null ? "" : projectId.trim();
+        return jdbc.queryForList("""
+            SELECT e.*,COALESCE((SELECT count(*) FROM evidence_links l WHERE l.evidence_id=e.id),0) AS linked_count
+            FROM evidence e WHERE e.owner_id=? AND (?='' OR e.project_id=?)
+            ORDER BY e.created_at DESC LIMIT 500
+            """, ownerId, filter, filter);
+    }
+
+    public List<Map<String, Object>> observations(String ownerId, String projectId, int limit) {
+        var filter = projectId == null ? "" : projectId.trim();
+        return jdbc.queryForList("""
+            SELECT o.id,o.project_id,o.workflow_run_id,o.job_id,o.record_id,o.platform,o.source_item_id,
+                   o.content_hash,o.change_type,o.observed_at,o.captured_at,o.source_url,r.title,r.url
+            FROM observations o JOIN records r ON r.id=o.record_id
+            WHERE o.owner_id=? AND (?='' OR o.project_id=?)
+            ORDER BY o.captured_at DESC LIMIT ?
+            """, ownerId, filter, filter, Math.max(1, Math.min(500, limit)));
+    }
+
+    public Map<String, Object> reviewFinding(String ownerId, String reviewerId, String findingId, Map<String, Object> body) {
+        return transactions.execute(status -> {
+            var rows = jdbc.queryForList("SELECT * FROM evidence WHERE id=? AND owner_id=? FOR UPDATE", findingId, ownerId);
+            if (rows.isEmpty()) throw new ApiException(HttpStatus.NOT_FOUND, "Finding 不存在");
+            var action = text(body.get("action"));
+            if (!Set.of("approve", "edit", "reject").contains(action)) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "action 必须是 approve、edit 或 reject");
+            }
+            var current = rows.get(0);
+            var theme = text(body.get("theme"));
+            if (theme.isBlank()) theme = text(current.get("theme"));
+            var summary = text(body.get("summary"));
+            if (summary.isBlank()) summary = text(current.get("summary"));
+            var severity = body.containsKey("severity") ? integer(body.get("severity"), integer(current.get("severity"), 0)) : integer(current.get("severity"), 0);
+            severity = Math.max(0, Math.min(5, severity));
+            var rationale = text(body.get("rationale"));
+            var timestamp = now();
+            var reviewStatus = switch (action) {
+                case "approve" -> "approved";
+                case "reject" -> "rejected";
+                default -> "pending";
+            };
+            jdbc.update("""
+                UPDATE evidence SET theme=?,summary=?,severity=?,review_status=?,reviewed_by=?,reviewed_at=?,review_rationale=?
+                WHERE id=? AND owner_id=?
+                """, theme, summary, severity, reviewStatus, reviewerId, timestamp, rationale, findingId, ownerId);
+            jdbc.update("""
+                INSERT INTO finding_reviews(id,evidence_id,owner_id,action,reviewer_id,theme,summary,severity,rationale,created_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?)
+                """, id(), findingId, ownerId, action, reviewerId, theme, summary, severity, rationale, timestamp);
+            jdbc.update("INSERT INTO audit_logs(id,owner_id,action,resource_type,resource_id,detail_json,created_at) VALUES(?,?,?,?,?,?,?)",
+                    id(), ownerId, "finding." + action, "evidence", findingId,
+                    json(mapper, Map.of("reviewerId", reviewerId, "rationale", rationale)), timestamp);
+            productEvents.track(ownerId, "finding_reviewed", text(current.get("project_id")), "evidence", findingId, Map.of("action", action));
+            return jdbc.queryForMap("""
+                SELECT e.*,COALESCE((SELECT count(*) FROM evidence_links l WHERE l.evidence_id=e.id),0) AS linked_count
+                FROM evidence e WHERE e.id=? AND e.owner_id=?
+                """, findingId, ownerId);
+        });
+    }
+
+    private String persistRecord(String ownerId, String platform, String projectId, String workflowRunId, String jobId, String timestamp, Map<String, Object> item) {
         var sourceId = text(item.get("id"));
         if (sourceId.isBlank()) sourceId = hash(text(item.get("text")) + "\n" + text(item.get("postedAt")));
         var content = text(item.get("text"));
         if (content.isBlank()) content = text(item.get("content"));
         var observed = text(item.get("postedAt")); if (observed.isBlank()) observed = timestamp;
+        var rawJson = json(mapper, item);
+        var contentHash = hash(rawJson);
+        var previous = projectId.isBlank()
+                ? jdbc.queryForList("SELECT content_hash FROM observations WHERE owner_id=? AND platform=? AND source_item_id=? ORDER BY captured_at DESC LIMIT 1", ownerId, platform, sourceId)
+                : jdbc.queryForList("SELECT content_hash FROM observations WHERE owner_id=? AND project_id=? AND platform=? AND source_item_id=? ORDER BY captured_at DESC LIMIT 1", ownerId, projectId, platform, sourceId);
+        var priorRows = projectId.isBlank()
+                ? jdbc.queryForList("SELECT 1 FROM observations WHERE owner_id=? AND platform=? AND job_id<>? LIMIT 1", ownerId, platform, jobId)
+                : jdbc.queryForList("SELECT 1 FROM observations WHERE owner_id=? AND project_id=? AND job_id<>? LIMIT 1", ownerId, projectId, jobId);
+        var changeType = priorRows.isEmpty() ? "baseline" : previous.isEmpty() ? "new" : contentHash.equals(text(previous.get(0).get("content_hash"))) ? "unchanged" : "changed";
         var recordId=id();jdbc.update("""
             INSERT INTO records(id,owner_id,platform,source_item_id,item_type,title,content,author,url,observed_at,metrics_json,raw_json,first_seen_job_id,last_seen_job_id,first_seen_at,last_seen_at,duplicate_count)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
@@ -293,17 +447,40 @@ public class JobService {
             """, recordId, ownerId, platform, sourceId, text(item.get("itemType")).isBlank() ? "post" : text(item.get("itemType")),
                 nullable(item.get("title")), content, nullable(item.get("author")), nullable(item.get("url")), observed,
                 json(mapper, item.getOrDefault("metrics", Map.of())), json(mapper, item.getOrDefault("raw", item)), jobId, jobId, timestamp, timestamp);
-        return text(jdbc.queryForMap("SELECT id FROM records WHERE owner_id=? AND platform=? AND source_item_id=?",ownerId,platform,sourceId).get("id"));
+        var persistedId = text(jdbc.queryForMap("SELECT id FROM records WHERE owner_id=? AND platform=? AND source_item_id=?",ownerId,platform,sourceId).get("id"));
+        jdbc.update("""
+            INSERT INTO observations(id,owner_id,project_id,workflow_run_id,job_id,record_id,platform,source_item_id,content_hash,change_type,observed_at,captured_at,source_url,payload_json,created_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(job_id,record_id) DO NOTHING
+            """, id(), ownerId, nullable(projectId), nullable(workflowRunId), jobId, persistedId, platform, sourceId,
+                contentHash, changeType, observed, timestamp, nullable(item.get("url")), rawJson, timestamp);
+        return persistedId;
     }
 
-    private void persistEvidence(String ownerId,String jobId,String reportId,List<Object> painPoints,List<String> recordIds,String timestamp){
+    private Map<String, Integer> observationCounts(String jobId) {
+        var result = new LinkedHashMap<String, Integer>();
+        result.put("baseline", 0); result.put("new", 0); result.put("changed", 0); result.put("unchanged", 0);
+        for (var row : jdbc.queryForList("SELECT change_type,count(*) AS count FROM observations WHERE job_id=? GROUP BY change_type", jobId)) {
+            result.put(text(row.get("change_type")), integer(row.get("count"), 0));
+        }
+        return result;
+    }
+
+    private int persistEvidence(String ownerId,String projectId,String workflowRunId,String jobId,String reportId,List<Object> painPoints,List<String> recordIds,String timestamp,String methodKey,Map<String,Integer> observationCounts){
+        var changeTypes = new HashMap<String, String>();
+        for (var row : jdbc.queryForList("SELECT record_id,change_type FROM observations WHERE job_id=?", jobId)) changeTypes.put(text(row.get("record_id")), text(row.get("change_type")));
+        var candidateCount = 0;
         for(var value:painPoints){
             var point=object(value);var evidenceId=id();var members=array(point.get("memberIndices"));
-            jdbc.update("INSERT INTO evidence(id,owner_id,job_id,report_id,theme,summary,severity,source_count,created_at) VALUES(?,?,?,?,?,?,?,?,?)",evidenceId,ownerId,jobId,reportId,text(point.get("theme")),text(point.get("summary")),Math.max(0,Math.min(5,integer(point.get("severity"),0))),members.size(),timestamp);
             var linked=new ArrayList<String>();
-            for(var indexValue:members){var index=integer(indexValue,-1);if(index>=0&&index<recordIds.size()&&!linked.contains(recordIds.get(index))){var recordId=recordIds.get(index);linked.add(recordId);jdbc.update("INSERT INTO evidence_links(id,evidence_id,record_id,relation,created_at) VALUES(?,?,?,'supports',?) ON CONFLICT(evidence_id,record_id) DO NOTHING",id(),evidenceId,recordId,timestamp);}}
-            for(int left=0;left<linked.size()&&left<20;left++)for(int right=left+1;right<linked.size()&&right<20;right++)jdbc.update("INSERT INTO record_relationships(id,owner_id,source_record_id,target_record_id,relation,confidence,created_at) VALUES(?,?,?,?, 'co-supports',80,?) ON CONFLICT(source_record_id,target_record_id,relation) DO NOTHING",id(),ownerId,linked.get(left),linked.get(right),timestamp);
+            var hasDelta = false;
+            for(var indexValue:members){var index=integer(indexValue,-1);if(index>=0&&index<recordIds.size()&&!linked.contains(recordIds.get(index))){var recordId=recordIds.get(index);linked.add(recordId);var type=changeTypes.get(recordId);hasDelta=hasDelta||"new".equals(type)||"changed".equals(type);}}
+            if (linked.isEmpty() || ("competitive-research".equals(methodKey) && observationCounts.getOrDefault("baseline", 0) == 0 && !hasDelta)) continue;
+            jdbc.update("INSERT INTO evidence(id,owner_id,project_id,workflow_run_id,job_id,report_id,theme,summary,severity,source_count,uncertainties_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",evidenceId,ownerId,nullable(projectId),nullable(workflowRunId),jobId,reportId,text(point.get("theme")),text(point.get("summary")),Math.max(0,Math.min(5,integer(point.get("severity"),0))),linked.size(),json(mapper, point.getOrDefault("uncertainties", List.of())),timestamp);
+            for (var recordId : linked) jdbc.update("INSERT INTO evidence_links(id,evidence_id,record_id,relation,created_at) VALUES(?,?,?,'supports',?) ON CONFLICT(evidence_id,record_id) DO NOTHING",id(),evidenceId,recordId,timestamp);
+            for(int left=0;left<linked.size()&&left<20;left++)for(int right=left+1;right<linked.size()&&right<20;right++)jdbc.update("INSERT INTO record_relationships(id,owner_id,project_id,source_record_id,target_record_id,relation,confidence,created_at) VALUES(?,?,?,?,?,'co-supports',80,?) ON CONFLICT(source_record_id,target_record_id,relation) DO NOTHING",id(),ownerId,nullable(projectId),linked.get(left),linked.get(right),timestamp);
+            candidateCount++;
         }
+        return candidateCount;
     }
 
     private Object nullable(Object value) { var text = text(value); return text.isBlank() ? null : text; }

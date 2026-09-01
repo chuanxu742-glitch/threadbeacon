@@ -15,6 +15,8 @@ export interface PainPoint {
   readonly keywords: readonly string[];
   /** 严重度 0-5，由 LLM 评估。 */
   readonly severity: number;
+  /** 当前材料无法确定、需要人工复核的关键未知项。 */
+  readonly uncertainties?: readonly string[];
   /** 簇内原文，按位对应 memberIndices。 */
   readonly texts: readonly string[];
   /** 簇成员在 items 数组里的下标，用于把痛点关联回原始记录。 */

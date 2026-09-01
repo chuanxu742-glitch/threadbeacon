@@ -1,4 +1,5 @@
 const STORAGE_KEY = 'threadbeacon.basic-auth';
+const WORKSPACE_KEY = 'threadbeacon.workspace-id';
 let installed = false;
 
 export function basicCredential(username: string, password: string) {
@@ -20,6 +21,22 @@ export function clearAuthCredential() {
   sessionStorage.removeItem(STORAGE_KEY);
 }
 
+export function workspaceId() {
+  return localStorage.getItem(WORKSPACE_KEY) ?? '';
+}
+
+export function saveWorkspaceId(value: string) {
+  if (value) {
+    localStorage.setItem(WORKSPACE_KEY, value);
+  } else {
+    localStorage.removeItem(WORKSPACE_KEY);
+  }
+}
+
+export function clearWorkspaceId() {
+  localStorage.removeItem(WORKSPACE_KEY);
+}
+
 export function installAuthenticatedFetch() {
   if (installed) return;
   installed = true;
@@ -32,6 +49,8 @@ export function installAuthenticatedFetch() {
     const headers = new Headers(input instanceof Request ? input.headers : undefined);
     new Headers(init.headers).forEach((value, key) => headers.set(key, value));
     if (!headers.has('authorization')) headers.set('authorization', credential);
+    const workspace = workspaceId();
+    if (workspace && !headers.has('x-workspace-id')) headers.set('x-workspace-id', workspace);
     return original(input, { ...init, headers });
   };
 }

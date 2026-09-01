@@ -26,6 +26,8 @@ export interface AnalyzeRequest {
   readonly mode?: 'searchAll' | 'streamLive';
   /** streamLive 模式的最长订阅时长，默认 60 秒。 */
   readonly maxDurationMs?: number;
+  /** 研究方法会改变 Finding 的归纳口径；未指定时保持通用用户反馈分析。 */
+  readonly researchMethod?: 'competitive-research' | 'generic-research';
 }
 
 const DEFAULT_STREAM_MS = 60_000;
@@ -122,8 +124,22 @@ const SYSTEM_PROMPT = [
   '3. keywords 取最能代表这组反馈的几个词。',
   '',
   '仅输出 JSON，不要代码块围栏，不要额外说明：',
-  '{"theme":"主题短语","summary":"两三句概括","keywords":["词1","词2"],"severity":0}',
+  '{"theme":"主题短语","summary":"两三句概括","keywords":["词1","词2"],"uncertainties":["尚不能确定的事项"],"severity":0}',
   'severity 取 0-5 的整数，表示该痛点的严重程度。',
+].join('\n');
+
+const COMPETITIVE_RESEARCH_PROMPT = [
+  '你是技术产品竞品研究分析师。输入是一组来自可信公开来源的相关信号。',
+  '请把它们归纳成一个可复核的竞品 Finding，重点识别产品、定价、定位、生态、招聘或市场动作的变化信号。',
+  '',
+  '要求：',
+  '1. theme 是清晰、短的变化主题，不要写成泛泛的用户痛点。',
+  '2. summary 说明观察到的事实、可能影响，以及不能从当前材料确定的部分。不要编造来源之外的事实。',
+  '3. keywords 取最能代表该变化的几个词。',
+  '',
+  '仅输出 JSON，不要代码块围栏，不要额外说明：',
+  '{"theme":"变化主题","summary":"事实、影响与未知项","keywords":["词1","词2"],"uncertainties":["尚不能从当前材料确定的事项"],"severity":0}',
+  'severity 取 0-5 的整数，表示该变化对研究对象决策的相对重要性。',
 ].join('\n');
 
 /** LLM 有时会套代码块围栏，剥掉后再解析。 */
@@ -158,7 +174,7 @@ export async function analyze(
   const summaries = await mapConcurrent(
     clustered.clusters,
     summaryConcurrency,
-    (cluster) => summarize(deps.llm, cluster),
+    (cluster) => summarize(deps.llm, cluster, req.researchMethod),
   );
   const painPoints = summaries.filter((p): p is PainPoint => p !== undefined);
 
@@ -183,9 +199,9 @@ export async function analyze(
 }
 
 /** 单个簇的归纳。LLM 拒答或输出不可解析时返回 undefined，跳过该簇而非中断整轮。 */
-async function summarize(llm: ILlmClient, cluster: ClusterResult): Promise<PainPoint | undefined> {
+async function summarize(llm: ILlmClient, cluster: ClusterResult, researchMethod?: AnalyzeRequest['researchMethod']): Promise<PainPoint | undefined> {
   const res = await llm.complete({
-    system: SYSTEM_PROMPT,
+    system: researchMethod === 'competitive-research' ? COMPETITIVE_RESEARCH_PROMPT : SYSTEM_PROMPT,
     messages: [{ role: 'user', content: cluster.texts.join('\n---\n') }],
   });
   if (res.refused || !res.text.trim()) return undefined;
@@ -209,6 +225,7 @@ async function summarize(llm: ILlmClient, cluster: ClusterResult): Promise<PainP
     size: cluster.size,
     keywords: asStringArray(o['keywords']),
     severity: clampSeverity(o['severity']),
+    uncertainties: asStringArray(o['uncertainties']),
     texts: cluster.texts,
     // ClusterResult.indices 已由聚类层还原成原始输入数组的下标，
     // 与 report.items 一一对应
