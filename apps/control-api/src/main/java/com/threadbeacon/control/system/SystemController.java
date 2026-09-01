@@ -24,7 +24,39 @@ public class SystemController {
     public SystemController(JdbcTemplate jdbc,CurrentUser user,NodeService nodes,JobService jobs,ScheduleService schedules,ObjectMapper mapper){this.jdbc=jdbc;this.user=user;this.nodes=nodes;this.jobs=jobs;this.schedules=schedules;this.mapper=mapper;}
 
     @GetMapping("/health") Map<String,Object> health(){jdbc.queryForObject("SELECT 1",Integer.class);return Map.of("ok",true,"service","threadbeacon-control-api","runtime","spring-boot","database","postgresql","objectStorage","s3");}
-    @GetMapping("/openapi") Map<String,Object> openapi(){var paths=new LinkedHashMap<String,Object>();paths.put("/api/health",Map.of("get",Map.of("summary","Health check")));paths.put("/api/jobs",Map.of("get",Map.of("summary","List jobs"),"post",Map.of("summary","Create job")));paths.put("/api/reports/{id}",Map.of("get",Map.of("summary","Read a report with approved findings only")));paths.put("/api/findings",Map.of("get",Map.of("summary","List reviewable findings")));paths.put("/api/findings/{id}/review",Map.of("post",Map.of("summary","Approve, edit, or reject a finding")));paths.put("/api/observations",Map.of("get",Map.of("summary","List immutable source observations")));paths.put("/api/product-metrics",Map.of("get",Map.of("summary","Read the project activation funnel")));paths.put("/api/skills",Map.of("get",Map.of("summary","List governed Skills"),"post",Map.of("summary","Create a versioned Skill")));paths.put("/api/skills/{id}/runs",Map.of("post",Map.of("summary","Queue an auditable Skill run")));paths.put("/api/skills/{id}/runs/{runId}/reviews/{reviewId}/approve",Map.of("post",Map.of("summary","Approve one exact risky Agent action")));paths.put("/api/worker/skills/claim",Map.of("post",Map.of("summary","Claim a leased Agent Skill run")));paths.put("/api/integrations/dify/import",Map.of("post",Map.of("summary","Safely import a Dify YAML draft")));paths.put("/api/mcp",Map.of("post",Map.of("summary","MCP JSON-RPC endpoint for PAT clients")));paths.put("/api/v1/owned-acquisitions",Map.of("post",Map.of("summary","Queue an audited creator-owned acquisition")));paths.put("/api/v1/internal/geo-acquisition/executions",Map.of("post",Map.of("summary","Submit idempotent GEO acquisition")));return Map.of("openapi","3.1.0","info",Map.of("title","ThreadBeacon Control API","version","1.2.0"),"paths",paths);}
+    @GetMapping("/openapi") Map<String,Object> openapi(){
+        var paths=new LinkedHashMap<String,Object>();
+        paths.put("/api/health",Map.of("get",operation("Health check")));
+        paths.put("/api/v2/me/context",Map.of("get",operation("Read workspace context and system pulse")));
+        paths.put("/api/v2/attention",Map.of("get",operation("List attention projections")));
+        paths.put("/api/v2/attention/{id}",Map.of("get",operation("Read an attention item"),"patch",operation("Resolve or ignore an attention item")));
+        paths.put("/api/v2/projects",Map.of("get",operation("List projects"),"post",operation("Create a project")));
+        paths.put("/api/v2/projects/{id}",Map.of("get",operation("Read a project"),"patch",operation("Update or archive a project with revision control")));
+        paths.put("/api/v2/projects/{id}/readiness",Map.of("get",operation("Derive project readiness")));
+        paths.put("/api/v2/projects/{id}/sources",Map.of("get",operation("List project sources"),"post",operation("Create a project source")));
+        paths.put("/api/v2/projects/{id}/workflows",Map.of("get",operation("List project workflows"),"post",operation("Create a workflow draft")));
+        paths.put("/api/v2/workflows/{id}/draft",Map.of("get",operation("Read a workflow draft"),"put",operation("Save a revision-controlled workflow draft")));
+        paths.put("/api/v2/workflows/{id}/validate",Map.of("post",operation("Validate a workflow draft")));
+        paths.put("/api/v2/workflows/{id}/publish",Map.of("post",operation("Publish an immutable workflow version")));
+        paths.put("/api/v2/workflow-versions/{id}/runs",Map.of("post",operation("Create an idempotent project run")));
+        paths.put("/api/v2/projects/{id}/runs",Map.of("get",operation("List project runs")));
+        paths.put("/api/v2/runs/{id}",Map.of("get",operation("Read a run projection")));
+        paths.put("/api/v2/projects/{id}/observations",Map.of("get",operation("List immutable observations")));
+        paths.put("/api/v2/projects/{id}/findings",Map.of("get",operation("List versioned findings")));
+        paths.put("/api/v2/findings/{id}/reviews",Map.of("post",operation("Append a finding review revision")));
+        paths.put("/api/v2/projects/{id}/reports",Map.of("get",operation("List immutable report versions")));
+        paths.put("/api/v2/report-drafts/{id}/publish",Map.of("post",operation("Publish an immutable report version")));
+        paths.put("/api/v2/reports/{id}/deliveries",Map.of("post",operation("Create an idempotent delivery operation")));
+        paths.put("/api/v2/deliveries/{id}",Map.of("get",operation("Read delivery attempts and business outcome")));
+        paths.put("/api/v2/automations",Map.of("get",operation("List repeatable workflow, schedule, and Skill methods")));
+        paths.put("/api/v2/capabilities/readiness",Map.of("get",operation("Read workspace capability readiness")));
+        paths.put("/api/v2/workspace/members",Map.of("get",operation("List workspace members")));
+        paths.put("/api/v2/settings/developer",Map.of("get",operation("Read safe developer access metadata")));
+        paths.put("/api/v2/settings/audit",Map.of("get",operation("Read cursor-paginated audit events")));
+        paths.put("/api/worker/skills/claim",Map.of("post",operation("Claim a leased Agent Skill run")));
+        paths.put("/api/mcp",Map.of("post",operation("MCP JSON-RPC endpoint for PAT clients")));
+        return Map.of("openapi","3.1.0","info",Map.of("title","ThreadBeacon Control API","version","2.0.0"),"paths",paths);
+    }
 
     @GetMapping("/dashboard") Map<String,Object> dashboard(){
         var owner=user.ownerId();var today=LocalDate.now(ZoneOffset.UTC).atStartOfDay().toInstant(ZoneOffset.UTC).toString();var cutoff=Instant.now().minus(60,ChronoUnit.SECONDS).toString();
@@ -40,5 +72,6 @@ public class SystemController {
     @GetMapping("/schedules") Map<String,Object> schedules(){return Map.of("schedules",schedules.list(user.ownerId()));}
     @PostMapping("/schedules") Map<String,Object> createSchedule(@RequestBody Map<String,Object> body){return Map.of("schedule",schedules.create(user.ownerId(),body));}
     @PatchMapping("/schedules/{id}") Map<String,Object> scheduleAction(@PathVariable String id,@RequestBody Map<String,Object> body){schedules.action(user.ownerId(),id,text(body.get("action")));return Map.of("ok",true);}
+    private Map<String,Object> operation(String summary){return Map.of("summary",summary);}
     private int count(String sql,Object...args){Number value=jdbc.queryForObject(sql,Number.class,args);return value==null?0:value.intValue();}
 }

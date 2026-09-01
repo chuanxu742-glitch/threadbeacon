@@ -7,8 +7,9 @@
   },
   "scripts": {
     "dev": "vite --config vite.web.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "vite build --config vite.web.config.ts",
-    "lint": "eslint web app/components vite.web.config.ts"
+    "lint": "eslint web app vite.web.config.ts"
   },
   "dependencies": {
     "react": "19.2.6",

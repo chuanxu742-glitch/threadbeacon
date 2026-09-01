@@ -7,6 +7,65 @@
 # retire: compatibility surface that should be removed or migrated later
 
 capabilities:
+  - id: v2_workspace_attention
+    endpoints:
+      - GET /api/v2/me/context
+      - GET /api/v2/attention
+      - PATCH /api/v2/attention/{id}
+    exposure: owner_ui
+    product_area: today
+    user_language: 工作区上下文 / 待处理中心
+    notes: "v2 主入口；Attention 只改变人的处理投影，不改写权威业务状态。"
+
+  - id: v2_project_research_loop
+    endpoints:
+      - GET /api/v2/projects
+      - POST /api/v2/projects
+      - GET /api/v2/projects/{id}/readiness
+      - GET /api/v2/projects/{id}/sources
+      - GET /api/v2/projects/{id}/workflows
+      - GET /api/v2/projects/{id}/runs
+      - GET /api/v2/projects/{id}/observations
+      - GET /api/v2/projects/{id}/findings
+    exposure: owner_ui
+    product_area: projects
+    user_language: 项目研究闭环
+    notes: "新 Web 主链路；Project 是研究工作的唯一用户级容器。"
+
+  - id: v2_versioned_delivery
+    endpoints:
+      - POST /api/v2/workflows/{id}/publish
+      - POST /api/v2/workflow-versions/{id}/runs
+      - POST /api/v2/findings/{id}/reviews
+      - POST /api/v2/report-drafts/{id}/publish
+      - POST /api/v2/reports/{id}/deliveries
+      - GET /api/v2/deliveries/{id}
+    exposure: owner_ui
+    product_area: delivery
+    user_language: 版本发布 / 运行 / 复核 / 报告 / 交付
+    notes: "Workflow Version、Observation、Report Version 不可变；Delivery Operation 与 Attempt 分层。"
+
+  - id: v2_capability_readiness
+    endpoints:
+      - GET /api/v2/capabilities/readiness
+      - GET /api/v2/execution-resources
+      - GET /api/v2/connections
+    exposure: setup_status
+    product_area: system
+    user_language: 能力就绪度 / 执行资源 / 连接
+    notes: "就绪状态由真实依赖派生，不由前端手工设置。"
+
+  - id: v2_automation_governance_views
+    endpoints:
+      - GET /api/v2/automations
+      - GET /api/v2/workspace/members
+      - GET /api/v2/settings/developer
+      - GET /api/v2/settings/audit
+    exposure: owner_ui
+    product_area: system
+    user_language: 自动化方法 / 成员 / 开发者接口 / 审计
+    notes: "只返回安全投影；token hash、secret 和内部执行协议不进入 Web 响应。"
+
   - id: dashboard_overview
     endpoints:
       - GET /api/dashboard
@@ -80,18 +139,18 @@ capabilities:
       - POST /api/studio action=create-project
       - POST /api/studio action=create-source
       - POST /api/studio action=test-source
-    exposure: owner_ui
+    exposure: retire
     product_area: projects
     user_language: 项目 / 来源 / 试运行
-    notes: "项目创建应从研究问题和模板开始，来源试运行给出可行动错误。"
+    notes: "冻结兼容入口；新 UI 禁止调用。迁移完成后的下一个 minor release 删除人工操作入口。"
 
   - id: browser_profile_setup
     endpoints:
       - POST /api/studio action=create-browser-profile
-    exposure: setup_status
+    exposure: retire
     product_area: system
     user_language: 来源账号授权
-    notes: "普通用户看到授权状态；管理员才看到 Profile kind、Worker 绑定和证明状态。"
+    notes: "旧 /api/studio action 退役；授权状态迁往 v2 Connection/Readiness，机器协议保持独立。"
 
   - id: workflow_lifecycle
     endpoints:

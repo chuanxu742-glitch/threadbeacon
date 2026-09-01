@@ -26,7 +26,7 @@
     "control:build": "pnpm --dir apps/control-plane build",
     "control:java:check": "node scripts/java-control.mjs test",
     "control:lint": "pnpm --dir apps/control-plane lint",
-    "check": "pnpm typecheck && pnpm test && pnpm control:java:check && pnpm control:lint && pnpm control:build"
+    "check": "pnpm typecheck && pnpm test && pnpm control:java:check && pnpm --dir apps/control-plane typecheck && pnpm control:lint && pnpm control:build"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",

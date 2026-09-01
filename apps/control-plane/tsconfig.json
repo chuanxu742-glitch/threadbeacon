@@ -19,8 +19,8 @@
   "include": [
     "web/**/*.ts",
     "web/**/*.tsx",
-    "app/components/**/*.ts",
-    "app/components/**/*.tsx",
+    "app/**/*.ts",
+    "app/**/*.tsx",
     "vite.web.config.ts"
   ],
   "exclude": ["node_modules", "dist-web"]
