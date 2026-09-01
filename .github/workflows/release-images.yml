@@ -38,7 +38,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
       - name: Start release candidate control plane
-        run: docker compose -f compose.yaml -f infra/release-drill.compose.yaml up -d --build postgres minio control-api web
+        run: docker compose -f compose.yaml -f infra/release-drill.compose.yaml up -d --build postgres minio control-api web browser worker
       - name: Wait for the browser surface
         run: |
           for attempt in $(seq 1 90); do

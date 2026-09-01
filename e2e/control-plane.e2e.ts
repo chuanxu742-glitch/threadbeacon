@@ -40,7 +40,10 @@ test('关键研究闭环与只读社媒域可在浏览器完成', async ({ page 
   await page.getByLabel('类型').fill('web');
   await page.getByLabel('目标').fill('https://example.com/');
   await page.getByRole('button', { name: '保存来源' }).click();
-  await expect(page.locator('.tb-source-list').getByText(sourceName, { exact: true })).toBeVisible();
+  const sourceCard = page.locator('.tb-source-list article').filter({ hasText: sourceName });
+  await expect(sourceCard.getByText(sourceName, { exact: true })).toBeVisible();
+  await sourceCard.getByRole('button', { name: '探测来源' }).click();
+  await expect(sourceCard.locator('.tb-status')).toHaveText('active', { timeout: 60_000 });
 
   await page.goto(`/projects/${projectId}/orchestration`);
   await page.getByPlaceholder('新流程名称').fill(workflowName);
@@ -49,6 +52,7 @@ test('关键研究闭环与只读社媒域可在浏览器完成', async ({ page 
   await expect(page.getByText(workflowName).first()).toBeVisible();
   await page.getByRole('button', { name: '校验草稿' }).click();
   await expect(page.getByText('查看最近校验/发布响应')).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
   await page.getByRole('button', { name: '发布版本' }).click();
   await expect(page.getByRole('button', { name: '运行此版本' })).toBeVisible();
   await page.getByRole('button', { name: '运行此版本' }).click();

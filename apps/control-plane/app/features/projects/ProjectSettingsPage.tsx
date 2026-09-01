@@ -21,7 +21,8 @@ export function ProjectSettingsPage({ projectId }: { projectId: string }) {
   }
   async function createSource(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy('new'); setError(null);
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     try {
       const target = String(form.get('target') ?? '').trim();
       await v2.createSource(projectId, {
@@ -30,7 +31,7 @@ export function ProjectSettingsPage({ projectId }: { projectId: string }) {
         url: target,
         connectionId: String(form.get('connectionId') ?? '').trim(),
       });
-      sources.retry(); event.currentTarget.reset();
+      sources.retry(); formElement.reset();
     }
     catch (reason) { setError(reason instanceof Error ? reason : new Error('创建来源失败。')); }
     finally { setBusy(''); }
