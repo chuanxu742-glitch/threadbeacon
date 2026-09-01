@@ -24,7 +24,8 @@ export function OrchestrationPage({ projectId }: { projectId: string }) {
     if (!selectedId) return;
     setBusy(true); setActionError(null); setActionResult(null);
     try {
-      const revision = value(draft.data, 'revision', '');
+      const revision = Number(value(draft.data, 'revision', ''));
+      if (!Number.isInteger(revision) || revision < 1) throw new Error('流程草稿尚未加载完成，请稍后重试。');
       const result = action === 'validate' ? await v2.validateWorkflow(selectedId, { revision }) : await v2.publishWorkflow(selectedId, { revision });
       setActionResult(result); draft.retry(); versions.retry(); workflows.retry();
     } catch (reason) { setActionError(reason instanceof Error ? reason : new Error(`${action} 请求失败。`)); }
@@ -32,8 +33,9 @@ export function OrchestrationPage({ projectId }: { projectId: string }) {
   }
   async function createWorkflow(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setActionError(null);
-    const form = new FormData(event.currentTarget);
-    try { const result = await v2.createWorkflow(projectId, { name: String(form.get('name') ?? '').trim(), description: String(form.get('description') ?? '').trim() }); const id = objectId(result) || objectId(asRecord(result).workflow); if (id) setSelectedId(id); workflows.retry(); event.currentTarget.reset(); }
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    try { const result = await v2.createWorkflow(projectId, { name: String(form.get('name') ?? '').trim(), description: String(form.get('description') ?? '').trim() }); const id = objectId(result) || objectId(asRecord(result).workflow); if (id) setSelectedId(id); workflows.retry(); formElement.reset(); }
     catch (reason) { setActionError(reason instanceof Error ? reason : new Error('创建流程失败。')); }
     finally { setBusy(false); }
   }
