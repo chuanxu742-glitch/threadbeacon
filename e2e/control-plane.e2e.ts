@@ -88,7 +88,7 @@ test('关键研究闭环与只读社媒域可在浏览器完成', async ({ page 
   ] as const) {
     await page.goto(`/projects/${projectId}/social/${path}`);
     await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
-    await expect(page.getByText(/不会|只读/).first()).toBeVisible();
+    await expect(page.locator('.tb-social-readonly')).toBeVisible();
   }
 
   const forbiddenWrite = await page.evaluate(async () => {
