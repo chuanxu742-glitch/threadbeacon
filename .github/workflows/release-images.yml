@@ -10,7 +10,77 @@ permissions:
   packages: write
 
 jobs:
+  acceptance:
+    name: browser e2e and isolated restore
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      POSTGRES_USER: threadbeacon
+      POSTGRES_PASSWORD: release-drill-postgres-2026
+      THREADBEACON_LOCAL_AUTH_USERNAME: threadbeacon
+      THREADBEACON_LOCAL_AUTH_PASSWORD: release-drill-password-2026
+      THREADBEACON_NODE_REGISTRATION_KEY: release-drill-node-key-2026
+      THREADBEACON_ENCRYPTION_KEY: release-drill-encryption-key-32-bytes
+      THREADBEACON_S3_ACCESS_KEY: threadbeacon
+      THREADBEACON_S3_SECRET_KEY: release-drill-minio-secret-2026
+      THREADBEACON_S3_BUCKET: threadbeacon-reports
+      E2E_USERNAME: threadbeacon
+      E2E_PASSWORD: release-drill-password-2026
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10.13.1
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Start release candidate control plane
+        run: docker compose -f compose.yaml -f infra/release-drill.compose.yaml up -d --build postgres minio control-api web
+      - name: Wait for the browser surface
+        run: |
+          for attempt in $(seq 1 90); do
+            if curl --fail --silent http://127.0.0.1:3000/api/health >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          docker compose -f compose.yaml -f infra/release-drill.compose.yaml ps
+          docker compose -f compose.yaml -f infra/release-drill.compose.yaml logs control-api web
+          exit 1
+      - name: Install MinIO client and seed an object
+        run: |
+          mkdir -p .tools artifacts
+          curl --fail --silent --show-error --location --output .tools/mc https://dl.min.io/client/mc/release/linux-amd64/mc
+          chmod +x .tools/mc
+          .tools/mc alias set release-drill http://127.0.0.1:9000 "$THREADBEACON_S3_ACCESS_KEY" "$THREADBEACON_S3_SECRET_KEY" --api S3v4
+          .tools/mc mb --ignore-existing "release-drill/$THREADBEACON_S3_BUCKET"
+          printf 'release-drill evidence\n' | .tools/mc pipe "release-drill/$THREADBEACON_S3_BUCKET/acceptance/evidence.txt"
+      - name: Run browser E2E
+        run: pnpm test:e2e
+      - name: Back up and restore into isolated targets
+        env:
+          MC_BIN: .tools/mc
+        run: bash scripts/release-drill.sh
+      - name: Upload acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-acceptance-${{ github.sha }}
+          path: |
+            artifacts/release-drill
+            artifacts/playwright-report
+            artifacts/playwright-results
+          if-no-files-found: warn
+      - name: Show service logs on failure
+        if: failure()
+        run: docker compose -f compose.yaml -f infra/release-drill.compose.yaml logs --no-color
+      - name: Tear down drill environment
+        if: always()
+        run: docker compose -f compose.yaml -f infra/release-drill.compose.yaml down -v --remove-orphans
+
   images:
+    needs: acceptance
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

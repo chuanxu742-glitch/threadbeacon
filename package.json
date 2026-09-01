@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test --config playwright.config.ts",
     "worker": "tsx src/worker.ts",
     "gateway": "tsx src/gateway.ts",
     "control:dev": "pnpm --dir apps/control-plane dev",
@@ -38,6 +39,7 @@
     "ws": "^8.21.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "^22.15.0",
     "@types/ws": "^8.18.1",
     "tsx": "^4.19.2",
