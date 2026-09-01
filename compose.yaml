@@ -80,6 +80,8 @@ services:
   browser:
     build:
       context: ./infra/browser
+    security_opt:
+      - no-new-privileges:true
     environment:
       SCREEN_GEOMETRY: ${THREADBEACON_BROWSER_GEOMETRY:-1440x900x24}
       CHROMIUM_EXTRA_ARGS: ${THREADBEACON_CHROMIUM_EXTRA_ARGS:-}
