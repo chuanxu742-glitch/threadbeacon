@@ -2,6 +2,7 @@ import { Link } from '../routes/router.js';
 
 const items = [
   ['overview', '概览'],
+  ['social', '社媒态势'],
   ['orchestration', '编排'],
   ['operations', '运行'],
   ['data', '数据与证据'],

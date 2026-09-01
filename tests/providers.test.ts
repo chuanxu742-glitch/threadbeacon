@@ -186,6 +186,64 @@ describe('creator-owned acquisition', () => {
     expect(report).toMatchObject({ acquisitionMode: 'fetchOwned', items: [expect.objectContaining({ text: 'hello' })] });
   });
 
+  it('adds a per-item social envelope and redacts provider secrets only at the worker output boundary', async () => {
+    const provider = stubProvider('youtube-owned', 'youtube', 'user-authorized', ['fetchOwned']);
+    provider.fetchOwned = async () => ({
+      items: [{
+        text: 'owned post',
+        postedAt: '2026-08-05T00:00:00.000Z',
+        timeBucket: '2026-08-05',
+        platform: 'youtube',
+        itemType: 'post',
+        id: 'video-1',
+        author: 'channel-one',
+        url: 'https://www.youtube.com/watch?v=video-1&xsec_token=secret-token',
+        metrics: { likes: 2 },
+        raw: {
+          keep: 'provider metadata',
+          xsecToken: 'secret-token',
+          xsec_source: 'pc_search',
+          cookie: 'sid=secret-cookie',
+          accessToken: 'secret-access-token',
+          nested: { sessionId: 'secret-session', value: 'safe' },
+        },
+      }],
+      provenance: {
+        providerId: 'youtube-owned',
+        platform: 'youtube',
+        kind: 'user-authorized',
+        mode: 'fetchOwned',
+        fetchedAt: '2026-08-06T00:00:00.000Z',
+        legalBasis: 'authorized fixture',
+        robots: 'not-applicable',
+        auth: 'user-session',
+      },
+    });
+
+    const report = await executeCreatorOwned({
+      id: 'owned-social-job', platform: 'youtube', keyword: 'creator-owned', limit: 5, include_comments: 1, attempt: 1,
+      source_options_json: JSON.stringify({ mode: 'fetchOwned', grantHandle: 'opaque-grant-handle', sourceId: 'source-1' }),
+    }, new ProviderRegistry().register(provider)) as {
+      acquisitionMode: string;
+      items: Array<Record<string, unknown>>;
+      capabilityMetadata: { socialCapabilities: Array<Record<string, unknown>> };
+    };
+    const item = report.items[0]!;
+
+    // Existing item fields remain available to Java JobService and legacy exports.
+    expect(item).toMatchObject({ text: 'owned post', id: 'video-1', platform: 'youtube', itemType: 'post' });
+    expect(item.socialObservation).toMatchObject({
+      schema: 'threadbeacon.social.observation.v1',
+      externalId: 'video-1',
+      source: { providerId: 'youtube-owned', sourceId: 'source-1' },
+      sentiment: { status: 'pending' },
+    });
+    expect(item.url).toBe('https://www.youtube.com/watch?v=video-1');
+    expect(item.raw).toEqual({ keep: 'provider metadata', nested: { value: 'safe' } });
+    expect(JSON.stringify(report)).not.toMatch(/secret-token|secret-cookie|secret-access-token|secret-session/);
+    expect(report.capabilityMetadata.socialCapabilities[0]).not.toHaveProperty('legalBasis');
+  });
+
   it('fails closed when no authorized provider is enabled', async () => {
     await expect(executeCreatorOwned({
       id: 'owned-job', platform: 'youtube', keyword: 'creator-owned', limit: 5, include_comments: 1, attempt: 1,

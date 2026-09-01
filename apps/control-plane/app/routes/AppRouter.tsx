@@ -16,6 +16,13 @@ import { ReportDetailPage } from '../features/reports/ReportDetailPage.js';
 import { AutomationPage } from '../features/automation/AutomationPage.js';
 import { SetupPage } from '../features/setup/SetupPage.js';
 import { SettingsPage } from '../features/settings/SettingsPage.js';
+import { SocialOverviewPage } from '../features/social/SocialOverviewPage.js';
+import { SocialProjectPage } from '../features/social/SocialProjectPage.js';
+import { SocialStreamsPage } from '../features/social/SocialStreamsPage.js';
+import { SocialAccountsPage } from '../features/social/SocialAccountsPage.js';
+import { SocialContentPage } from '../features/social/SocialContentPage.js';
+import { SocialInsightsPage } from '../features/social/SocialInsightsPage.js';
+import { SocialAlertsPage } from '../features/social/SocialAlertsPage.js';
 
 function LegacyRedirect({ to }: { to: string }) {
   useEffect(() => {
@@ -29,7 +36,7 @@ function NotFoundPage() {
 }
 
 function ApiDocsPage() {
-  const endpoints = ['GET /api/v2/me/context', 'GET /api/v2/attention', 'GET /api/v2/projects', 'GET /api/v2/projects/:id/readiness', 'POST /api/v2/workflows/:id/validate', 'POST /api/v2/workflows/:id/publish', 'GET /api/v2/projects/:id/runs', 'GET /api/v2/projects/:id/observations', 'GET /api/v2/reports/:id'];
+  const endpoints = ['GET /api/v2/me/context', 'GET /api/v2/attention', 'GET /api/v2/projects', 'GET /api/v2/projects/:id/readiness', 'GET /api/v2/social/overview', 'GET /api/v2/social/alerts', 'GET /api/v2/projects/:id/social/{overview|monitors|content|accounts|insights|alerts}', 'POST/PATCH /api/v2/projects/:id/social/monitors', 'PATCH /api/v2/projects/:id/social/alerts/:alertId', 'POST /api/v2/projects/:id/social/alerts/:alertId/{resolve|ignore}', 'POST /api/v2/workflows/:id/validate', 'POST /api/v2/workflows/:id/publish', 'GET /api/v2/projects/:id/runs', 'GET /api/v2/projects/:id/observations', 'GET /api/v2/reports/:id'];
   return <div className="tb-page"><section className="tb-card"><p className="tb-eyebrow">V2 CONTRACT</p><h1>控制面 API</h1><p className="tb-page-description">新 UI 只通过集中式 v2 client 访问资源；错误统一为 code、message、details 和 correlationId。</p><div className="tb-endpoint-list">{endpoints.map(endpoint => <code key={endpoint}>{endpoint}</code>)}</div><Link to="/today" className="tb-button tb-button-primary">返回工作台 →</Link></section></div>;
 }
 
@@ -44,7 +51,22 @@ function renderRoute(route: RouteMatch) {
       if (route.section === 'data') return <ResearchDataPage projectId={route.projectId}/>;
       if (route.section === 'delivery') return <DeliveryPage projectId={route.projectId}/>;
       if (route.section === 'settings') return <ProjectSettingsPage projectId={route.projectId}/>;
+      if (route.section === 'social') return <SocialProjectPage projectId={route.projectId}/>;
       return <ProjectOverviewPage projectId={route.projectId}/>;
+    case 'project-social':
+      if (route.section === 'streams') return <SocialStreamsPage projectId={route.projectId}/>;
+      if (route.section === 'accounts') return <SocialAccountsPage projectId={route.projectId}/>;
+      if (route.section === 'content') return <SocialContentPage projectId={route.projectId}/>;
+      if (route.section === 'insights') return <SocialInsightsPage projectId={route.projectId}/>;
+      if (route.section === 'alerts') return <SocialAlertsPage projectId={route.projectId}/>;
+      return <SocialProjectPage projectId={route.projectId}/>;
+    case 'social':
+      if (route.section === 'streams') return <SocialStreamsPage/>;
+      if (route.section === 'accounts') return <SocialAccountsPage/>;
+      if (route.section === 'content') return <SocialContentPage/>;
+      if (route.section === 'insights') return <SocialInsightsPage/>;
+      if (route.section === 'alerts') return <SocialAlertsPage/>;
+      return <SocialOverviewPage/>;
     case 'reports': return <ReportsPage/>;
     case 'report': return <ReportDetailPage reportId={route.reportId}/>;
     case 'automation': return <AutomationPage/>;

@@ -11,6 +11,7 @@ import type {
   ProviderCapability,
   ProviderKind,
 } from './types.js';
+import { buildSocialCapabilityCatalog, type SocialCapabilityDescriptor } from './social-capabilities.js';
 
 const keyOf = (platform: Platform, kind: ProviderKind): string => `${platform}:${kind}`;
 
@@ -57,6 +58,11 @@ export class ProviderRegistry {
 
   capabilities(): ProviderCapability[] {
     return [...this.byKey.values()].map((p) => p.capability);
+  }
+
+  /** 将已注册 provider 的能力投影为社媒域 readiness；不做网络探测或凭据判断。 */
+  socialCapabilities(): SocialCapabilityDescriptor[] {
+    return buildSocialCapabilityCatalog(this.capabilities());
   }
 
   /** 支持指定模式的平台清单。用于 UI 禁用不支持的组合。 */

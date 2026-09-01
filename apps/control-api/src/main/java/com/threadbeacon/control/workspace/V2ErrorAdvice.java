@@ -24,7 +24,8 @@ import java.util.UUID;
         "com.threadbeacon.control.report",
         "com.threadbeacon.control.delivery",
         "com.threadbeacon.control.attention",
-        "com.threadbeacon.control.automation"
+        "com.threadbeacon.control.automation",
+        "com.threadbeacon.control.social"
 })
 public class V2ErrorAdvice {
     @ExceptionHandler(V2ApiException.class)

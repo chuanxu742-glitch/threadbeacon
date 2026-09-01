@@ -1,0 +1,15 @@
+import { useState } from 'react';
+import { EmptyState } from '../../components/states.js';
+import { JsonDetails, StatusBadge } from '../../components/ui.js';
+import { Link } from '../../routes/router.js';
+import { DataState, list, pickId, value } from '../shared.js';
+import { ProjectFrame } from '../projects/ProjectFrame.js';
+import { applySocialFilters, SocialCapabilityBadges, SocialFilterBar, SocialPageHeader, SocialReadOnlyNote, socialAuthor, socialStatus, useSocialQuery } from './social-shared.js';
+
+export function SocialStreamsPage({ projectId }: { projectId?: string }) {
+  const [filters, setFilters] = useState({ platform: '', status: '', query: '', topic: '' });
+  const query = useSocialQuery(projectId, 'content', filters);
+  const items = applySocialFilters(list(query.data, 'streams', 'streamItems', 'items', 'content'), filters);
+  const page = <div className="tb-page tb-social-page"><SocialPageHeader eyebrow={projectId ? 'PROJECT SOCIAL / LISTENING STREAMS' : 'SOCIAL / LISTENING STREAMS'} title="监听流" description={projectId ? '查看各平台监控产生的公开事件；原始内容只作为只读信号进入项目证据链。' : '全局入口展示 /api/v2/social/overview 返回的监听样本；详情、游标和完整筛选请进入具体项目。'} projectId={projectId} active="streams" actions={<Link to={projectId ? `/projects/${encodeURIComponent(projectId)}/social` : '/social'} className="tb-button tb-button-secondary">社媒总览</Link>}/><SocialFilterBar filters={filters} onChange={next => setFilters({ platform: next.platform ?? '', status: next.status ?? '', query: next.query ?? '', topic: next.topic ?? '' })} includeTopic/><section className="tb-card"><header className="tb-card-header"><div><p className="tb-eyebrow">{projectId ? 'LISTENING STREAM' : 'OVERVIEW SAMPLE'}</p><h2>最近监听事件</h2><p>具体实时性、游标和平台覆盖以 v2 响应为准；全局样本不伪造分页。</p></div><span className="tb-count-pill">{items.length} 条</span></header><DataState loading={query.loading} error={query.error} retry={query.retry} empty={<EmptyState title="暂无监听事件" description="v2 尚未返回公开监听事件；先检查监控、平台连接和授权状态。"/>}>{items.length === 0 ? <EmptyState title="暂无监听事件" description="当前筛选下没有可展示的内容信号。"/> : <div className="tb-social-stream-list">{items.slice(0, 50).map((item, index) => {const id = pickId(item); const project = value(item, 'projectId', ''); return <article key={id || index}><span className="tb-social-stream-mark">↯</span><div><header><strong>{value(item, 'title', value(item, 'text', value(item, 'content', '监听事件')))}</strong><StatusBadge value={socialStatus(item)}/></header><p>{value(item, 'summary', value(item, 'text', value(item, 'content', '未提供内容摘要')))}</p><small>{socialAuthor(item)} · {value(item, 'capturedAt', value(item, 'publishedAt', '时间未提供'))} · {value(item, 'platform', '平台未提供')}</small><SocialCapabilityBadges item={item}/></div>{project && <Link to={`/projects/${encodeURIComponent(project)}/social`}>项目 →</Link>}</article>})}</div>}</DataState><JsonDetails value={query.data} label="查看监听流响应"/></section><SocialReadOnlyNote>监听流仅用于读取公开内容或已授权数据；没有发帖、评论、点赞、关注或 DM 控件。</SocialReadOnlyNote></div>;
+  return projectId ? <ProjectFrame projectId={projectId} section="social">{page}</ProjectFrame> : page;
+}

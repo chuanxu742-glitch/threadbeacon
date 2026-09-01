@@ -1,10 +1,14 @@
 import { useEffect, useState, type MouseEvent, type ReactNode } from 'react';
 
+export type SocialSection = 'overview' | 'streams' | 'accounts' | 'content' | 'insights' | 'alerts';
+
 export type RouteMatch =
   | { kind: 'today' }
   | { kind: 'projects' }
   | { kind: 'project-new' }
-  | { kind: 'project'; projectId: string; section: 'overview' | 'orchestration' | 'operations' | 'data' | 'delivery' | 'settings' }
+  | { kind: 'project'; projectId: string; section: 'overview' | 'orchestration' | 'operations' | 'data' | 'delivery' | 'settings' | 'social' }
+  | { kind: 'social'; section: SocialSection }
+  | { kind: 'project-social'; projectId: string; section: SocialSection }
   | { kind: 'reports' }
   | { kind: 'report'; reportId: string }
   | { kind: 'automation' }
@@ -18,7 +22,10 @@ export const stableRoutes = [
   '/today', '/projects', '/projects/new', '/projects/:projectId',
   '/projects/:projectId/orchestration', '/projects/:projectId/operations',
   '/projects/:projectId/data', '/projects/:projectId/delivery', '/projects/:projectId/settings',
+  '/projects/:projectId/social', '/projects/:projectId/social/streams', '/projects/:projectId/social/accounts',
+  '/projects/:projectId/social/content', '/projects/:projectId/social/insights', '/projects/:projectId/social/alerts',
   '/reports', '/reports/:reportId', '/automation', '/setup', '/settings',
+  '/social', '/social/streams', '/social/accounts', '/social/content', '/social/insights', '/social/alerts',
   '/settings/workspace', '/settings/members', '/settings/connections', '/settings/execution',
   '/settings/developer', '/settings/audit',
 ] as const;
@@ -80,6 +87,8 @@ export function matchRoute(pathname: string): RouteMatch {
   if (path === '/today') return { kind: 'today' };
   if (path === '/projects') return { kind: 'projects' };
   if (path === '/projects/new') return { kind: 'project-new' };
+  const projectSocial = path.match(/^\/projects\/([^/]+)\/social(?:\/(streams|accounts|content|insights|alerts))?$/);
+  if (projectSocial) return { kind: 'project-social', projectId: decode(projectSocial[1]), section: (projectSocial[2] ?? 'overview') as SocialSection };
   const project = path.match(/^\/projects\/([^/]+)(?:\/([^/]+))?$/);
   if (project) {
     const section = project[2] as string | undefined;
@@ -87,6 +96,8 @@ export function matchRoute(pathname: string): RouteMatch {
     if (section && !allowed.includes(section as typeof allowed[number])) return { kind: 'not-found' };
     return { kind: 'project', projectId: decode(project[1]), section: allowed.includes(section as typeof allowed[number]) ? section as typeof allowed[number] : 'overview' };
   }
+  const social = path.match(/^\/social(?:\/(streams|accounts|content|insights|alerts))?$/);
+  if (social) return { kind: 'social', section: (social[1] ?? 'overview') as SocialSection };
   if (path === '/reports') return { kind: 'reports' };
   const report = path.match(/^\/reports\/([^/]+)$/);
   if (report) return { kind: 'report', reportId: decode(report[1]) };

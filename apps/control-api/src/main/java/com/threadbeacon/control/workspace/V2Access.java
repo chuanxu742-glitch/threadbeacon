@@ -17,6 +17,8 @@ public final class V2Access {
     public static void workflowWrite(CurrentUser user) { require(user, "workflows:write", "workflows:run"); }
     public static void runRead(CurrentUser user) { require(user, "runs:read"); }
     public static void runWrite(CurrentUser user) { require(user, "runs:write", "workflows:run"); }
+    public static void socialRead(CurrentUser user) { require(user, "social:read", "records:read", "runs:read", "projects:read"); }
+    public static void socialWrite(CurrentUser user) { require(user, "social:write", "projects:write", "workflows:run"); }
 
     public static void require(CurrentUser user, String... accepted) {
         Set<String> scopes = user.scopes();

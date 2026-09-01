@@ -23,12 +23,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Locale;
+import java.util.regex.Pattern;
 
 import static com.threadbeacon.control.common.Values.*;
 
 @Service
 public class JobService {
     private static final Set<String> PLATFORMS = Set.of("geo","bluesky","reddit","youtube","twitter","tiktok","instagram","douyin","xiaohongshu","weibo","kuaishou","rss","rest","web");
+    private static final Set<String> SOCIAL_PLATFORMS = Set.of("youtube", "reddit", "bluesky", "xiaohongshu", "tiktok", "douyin");
+    private static final String SOCIAL_OBSERVATION_SCHEMA = "threadbeacon.social.observation.v1";
+    private static final Pattern SHA256_HEX = Pattern.compile("[0-9a-fA-F]{64}");
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transactions;
     private final ObjectMapper mapper;
@@ -431,14 +436,15 @@ public class JobService {
         if (content.isBlank()) content = text(item.get("content"));
         var observed = text(item.get("postedAt")); if (observed.isBlank()) observed = timestamp;
         var rawJson = json(mapper, item);
-        var contentHash = hash(rawJson);
+        var contentHash = contentHash(mapper, item, rawJson);
         var previous = projectId.isBlank()
                 ? jdbc.queryForList("SELECT content_hash FROM observations WHERE owner_id=? AND platform=? AND source_item_id=? ORDER BY captured_at DESC LIMIT 1", ownerId, platform, sourceId)
                 : jdbc.queryForList("SELECT content_hash FROM observations WHERE owner_id=? AND project_id=? AND platform=? AND source_item_id=? ORDER BY captured_at DESC LIMIT 1", ownerId, projectId, platform, sourceId);
         var priorRows = projectId.isBlank()
                 ? jdbc.queryForList("SELECT 1 FROM observations WHERE owner_id=? AND platform=? AND job_id<>? LIMIT 1", ownerId, platform, jobId)
                 : jdbc.queryForList("SELECT 1 FROM observations WHERE owner_id=? AND project_id=? AND job_id<>? LIMIT 1", ownerId, projectId, jobId);
-        var changeType = priorRows.isEmpty() ? "baseline" : previous.isEmpty() ? "new" : contentHash.equals(text(previous.get(0).get("content_hash"))) ? "unchanged" : "changed";
+        var previousHash = previous.isEmpty() ? "" : text(previous.get(0).get("content_hash"));
+        var changeType = classifyChange(priorRows.isEmpty(), previousHash, contentHash);
         var recordId=id();jdbc.update("""
             INSERT INTO records(id,owner_id,platform,source_item_id,item_type,title,content,author,url,observed_at,metrics_json,raw_json,first_seen_job_id,last_seen_job_id,first_seen_at,last_seen_at,duplicate_count)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
@@ -454,6 +460,34 @@ public class JobService {
             """, id(), ownerId, nullable(projectId), nullable(workflowRunId), jobId, persistedId, platform, sourceId,
                 contentHash, changeType, observed, timestamp, nullable(item.get("url")), rawJson, timestamp);
         return persistedId;
+    }
+
+    /**
+     * Uses the worker's normalized content hash only after validating both its
+     * schema and SHA-256 shape.  The full item JSON remains the safe fallback
+     * for legacy, malformed, and non-social items.
+     */
+    static String contentHash(ObjectMapper mapper, Map<String, Object> item) {
+        var rawJson = json(mapper, item);
+        return contentHash(mapper, item, rawJson);
+    }
+
+    private static String contentHash(ObjectMapper mapper, Map<String, Object> item, String rawJson) {
+        var normalized = object(item.get("socialObservation"));
+        var platform = text(item.get("platform")).toLowerCase(Locale.ROOT);
+        var candidate = text(normalized.get("contentHash"));
+        if ((SOCIAL_PLATFORMS.contains(platform) || platform.startsWith("opencli:"))
+                && SOCIAL_OBSERVATION_SCHEMA.equals(text(normalized.get("schema")))
+                && SHA256_HEX.matcher(candidate).matches()) {
+            return candidate.toLowerCase(Locale.ROOT);
+        }
+        return hash(rawJson);
+    }
+
+    static String classifyChange(boolean noPriorRows, String previousHash, String currentHash) {
+        if (noPriorRows) return "baseline";
+        if (previousHash == null || previousHash.isBlank()) return "new";
+        return currentHash.equals(previousHash) ? "unchanged" : "changed";
     }
 
     private Map<String, Integer> observationCounts(String jobId) {

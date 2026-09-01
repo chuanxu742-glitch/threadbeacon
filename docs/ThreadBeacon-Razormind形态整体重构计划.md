@@ -71,6 +71,7 @@ Workspace
 |---|---|---|
 | 今天 | 现在有什么需要我处理？ | Attention Item、System Pulse、Recent Report |
 | 项目 | 我们持续研究什么？ | Project |
+| 社媒态势 | 跨项目有哪些公开信号、趋势和异常？ | Social Monitor、Content Projection、Account Projection、Insight、Alert |
 | 报告 | 团队产出了什么？ | Report Version |
 | 自动化 | 哪些研究方法在重复运行？ | Automation、Playbook、Skill |
 | 设置中心 | 系统缺什么、哪里不健康？ | Capability Readiness、Connection、Execution Resource |
@@ -85,6 +86,7 @@ Workspace
 | 项目页 | 职责 | 不应出现 |
 |---|---|---|
 | 概览 | 研究目标、负责人、就绪度、最新变化、阻塞项、下一动作 | 完整日志、raw JSON |
+| 社媒态势 | 项目监控、监听流、账号、内容、趋势洞察、告警 | 自动发帖、评论、点赞、私信 |
 | 编排 | Primary Workflow、草稿、校验、版本发布、高级画布 | Worker 管理、运行日志墙 |
 | 运行 | Automation、Run、节点事件、Trace、重试与恢复 | 编辑工作流定义 |
 | 数据与证据 | Observation、Record、Finding、Evidence Link、Review | 来源凭据明文 |
@@ -100,11 +102,23 @@ Workspace
 /projects
 /projects/new
 /projects/:projectId
+/projects/:projectId/social
+/projects/:projectId/social/streams
+/projects/:projectId/social/accounts
+/projects/:projectId/social/content
+/projects/:projectId/social/insights
+/projects/:projectId/social/alerts
 /projects/:projectId/orchestration
 /projects/:projectId/operations
 /projects/:projectId/data
 /projects/:projectId/delivery
 /projects/:projectId/settings
+/social
+/social/streams
+/social/accounts
+/social/content
+/social/insights
+/social/alerts
 /reports
 /reports/:reportId
 /automation
@@ -294,6 +308,25 @@ Workspace Readiness 检查共享能力；Project Readiness 只检查当前项目
 - `lastCheckedAt`；
 - `evidence`：探测或策略依据。
 
+## 3.11 Social Listening
+
+社媒不是平行于 Project 的第二套任务系统，而是 Source → Observation → Finding 主链路上的专用产品投影：
+
+- Social Monitor：项目内的关键词、账号或主题监听配置；
+- Social Content：从不可变 Observation/Record 派生的内容、评论和会话投影；
+- Social Account：按平台与作者身份聚合的账号投影；
+- Social Insight：趋势、话题、互动和情绪分析结果；
+- Social Alert：需要人工判断的异常、授权、连接或研究信号投影。
+
+约束：
+
+- Project 是 Monitor、Content、Insight 和 Alert 的唯一业务归属；全局 `/social` 只做跨项目态势聚合；
+- Content 与 Account 不复制第二份可变来源事实，必须能回到稳定 Observation ID、来源 URL、provider 和 legal basis；
+- 未返回的互动量保持缺失，不能伪造成 0；未分析的情绪为 `pending`，不能伪造成 `neutral`；
+- 平台能力按 `official / licensed / experimental` 分级，并分别显示凭据、配额、登录态、授权范围和探测状态；
+- 增加平台只允许新增 provider adapter 和 capability/readiness 映射，不得新增平台专属领域表或平行页面体系；
+- P0 只做读取、分析和告警；发帖、评论、点赞、关注、私信等 outbound 行为必须等待独立的审批、速率限制、幂等、审计和 Operation/Attempt/Outcome 设计。
+
 ## 4. Java 控制面目标模块
 
 保持一个 Spring Boot 应用，不引入 Spring Cloud。按领域包拆分：
@@ -306,6 +339,7 @@ com.threadbeacon.control
   workflow/        Draft、Validation、Version、Automation
   run/             Run、Attempt、Trace、恢复
   research/        Observation、Record、Finding、Evidence、Review
+  social/          Monitor、Content/Account Projection、Insight、Alert
   report/          Report Draft、Report Version、渲染投影
   delivery/        Operation、Attempt、Outcome
   capability/      Catalog、Readiness、Execution Resource
@@ -373,6 +407,17 @@ POST   /api/v2/runs/:id/actions/:action
 GET    /api/v2/projects/:id/observations
 GET    /api/v2/projects/:id/findings
 POST   /api/v2/findings/:id/reviews
+
+GET    /api/v2/social/overview
+GET    /api/v2/projects/:id/social/overview
+GET    /api/v2/projects/:id/social/monitors
+POST   /api/v2/projects/:id/social/monitors
+PATCH  /api/v2/projects/:id/social/monitors/:monitorId
+GET    /api/v2/projects/:id/social/content
+GET    /api/v2/projects/:id/social/accounts
+GET    /api/v2/projects/:id/social/insights
+GET    /api/v2/projects/:id/social/alerts
+PATCH  /api/v2/projects/:id/social/alerts/:alertId
 
 GET    /api/v2/projects/:id/reports
 POST   /api/v2/projects/:id/report-drafts
@@ -456,6 +501,7 @@ apps/control-plane/app
     orchestration/
     operations/
     research-data/
+    social/
     reports/
     delivery/
     automation/
@@ -568,6 +614,9 @@ Exit Gate：
 交付物：
 
 - Observation/Record 双层数据页；
+- Social Monitor、跨平台 Content/Account 投影、Insight 和 Alert；
+- 全局 `/social` 态势入口与项目内社媒工作台；
+- 社媒能力目录、平台 readiness 与 official/licensed/experimental 分级；
 - Finding、Evidence Link、Review revision；
 - 报告草稿和不可变 Report Version；
 - 报告阅读、导出和精确引用；
@@ -579,6 +628,8 @@ Exit Gate：
 
 - 报告中 100% 正式 Finding 已批准；
 - 抽样 Evidence Link 可回到不可变 Observation；
+- 社媒 Content/Account 均可回到同一份 Observation/Record，不存在第二套事实数据；
+- 未知互动量与未分析情绪不会被伪造，P0 不暴露任何平台写动作；
 - 同一 Delivery 重试不产生重复业务意图；
 - 旧报告可迁移或明确标为 legacy，不伪装成完整证据报告。
 
@@ -714,6 +765,9 @@ Exit Gate：
 | Evidence Link 可回溯率 | 待真实验证 | ≥ 95%，工程抽样目标 100% | E2E 与抽样 |
 | 旧兼容写路径 | 多处聚合 action | 一个 adapter，随后删除 | 架构测试 |
 | 错误可行动性 | 部分纯文本 | 100% P0 错误有稳定 code，阻塞项有修复路由 | contract test |
+| 社媒来源语义 | provider 各自返回平台字段 | 100% 进入统一 social observation envelope | Provider contract test |
+| 社媒事实副本 | 无统一产品投影 | 0 个平行可变事实表，Content/Account 回溯 Observation | Migration/API test |
+| 社媒 outbound | 部分参考能力包含写动作 | P0 暴露 0 个写动作 | Capability/UI contract test |
 | 完整质量门 | `pnpm check` | 保持全绿并增加 v2/E2E/migration gate | CI |
 
 预期开发影响：
@@ -731,6 +785,9 @@ Exit Gate：
 | 找到失败原因 | 从进入项目到定位根因 ≤ 5 分钟 |
 | 找到待审核内容 | 从今天页 1 次点击进入对应 Finding/Report |
 | 判断项目能否运行 | 项目概览直接显示 readiness、阻塞原因和修复入口 |
+| 观察跨项目社媒态势 | 从 `/social` 看到活跃监控、内容趋势、平台状态和开放告警 |
+| 管理项目社媒范围 | 在项目内创建/启停 Monitor，并按平台、关键词、账号、话题筛选 |
+| 回溯社媒信号 | Content/Account/Alert 最多 2 次点击回到 Observation、来源与 provider lineage |
 | 回溯一条结论 | 最多 2 次点击到 Observation、来源 URL、哈希和 Run |
 | 查看历史执行 | 明确看到 Workflow Version、触发方式、节点 attempt 和 Trace |
 | 判断交付是否成功 | 区分提交成功、已确认送达、失败、未知 |
@@ -762,6 +819,7 @@ Exit Gate：
 | 产品结构清晰度 | 6/10 | 8.5/10 |
 | 运行可观察与可恢复 | 7.5/10 | 9/10 |
 | 团队管控体验 | 6/10 | 8.5/10 |
+| 社媒监听与管控 | 4/10（采集能力存在，产品闭环缺失） | 8/10（统一监听、投影、洞察、告警与回溯） |
 | 证据与交付可信度 | 6.5/10 | 8.5/10 |
 | 工程可维护性 | 7/10 | 8.5/10 |
 | 发布成熟度 | 5.5/10 | 8/10 |
@@ -794,6 +852,8 @@ Exit Gate：
 8. viewer 无法修改，editor 无法执行 owner 管理动作。
 9. MCP 与 Web 对相同操作得到相同权限结果并写入 audit。
 10. 旧 `/studio` URL 能确定性迁移，但新 UI 不调用旧写接口。
+11. 创建社媒 Monitor 后，可在项目内看到匹配 Content、聚合 Account、Insight 与 Alert，并回溯 Observation。
+12. 平台未授权、配额不足或实验能力不可用时显示真实 readiness，不创建假数据；所有 outbound 控件缺席。
 
 ## 12. 风险、降级与停止规则
 
@@ -847,6 +907,8 @@ Release 建议：
 - Web 主链路全部使用 `/api/v2`；
 - `platform-client.tsx` 和旧 Studio hash 写路径删除；
 - Project → Version → Run → Observation → Finding → Report → Delivery 全链可追溯；
+- `/social` 与项目内社媒工作台落地，Monitor → Content/Account → Insight/Alert → Observation 全链可追溯；
+- 社媒平台使用统一 normalization/capability contract，P0 不包含发帖、评论、点赞或私信；
 - Attention Center 覆盖 P0 人工处理场景；
 - Workspace/Project Readiness 基于真实依赖和探测；
 - compatibility adapter 没有新业务逻辑并有删除版本；

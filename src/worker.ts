@@ -15,12 +15,20 @@ import { analyze, summaryConcurrencyFromEnv } from './pipeline/analyze.js';
 import {
   createOpenCliProvider,
   inspectOpenCliRuntime,
+  OpenCliProvider,
   openCliCapabilities,
   type OpenCliCommand,
   type OpenCliRuntimeReport,
 } from './providers/opencli.js';
 import { GenericSourceProvider, type GenericSourceConfig } from './providers/generic-web.js';
 import { ProviderRegistry } from './providers/registry.js';
+import {
+  attachSocialObservationEnvelope,
+} from './providers/social.js';
+import {
+  safeSocialCapabilityMetadata,
+  type SocialCapabilityMetadata,
+} from './providers/social-capabilities.js';
 import type { Platform } from './providers/types.js';
 import { buildRegistry } from './runtime.js';
 import { executeBrowserAction } from './browser-automation/executor.js';
@@ -100,6 +108,10 @@ export interface WorkflowExecutionResult {
 export interface NodeCredentials {
   id: string;
   token: string;
+}
+
+export interface WorkerCapabilityMetadata {
+  readonly socialCapabilities: readonly SocialCapabilityMetadata[];
 }
 
 function positiveInteger(env: NodeJS.ProcessEnv, name: string, fallback: number, max: number): number {
@@ -269,12 +281,65 @@ function availablePlatforms(
   ];
 }
 
+/**
+ * 把当前 Worker 真正注册的 provider（含动态 OpenCLI 只读站点）投影成安全
+ * metadata。OpenCLI 的 provider 只在这里构造能力描述，不执行任何外部命令。
+ */
+export function workerSocialCapabilityMetadata(
+  catalog: readonly OpenCliCommand[],
+  env: NodeJS.ProcessEnv = process.env,
+): SocialCapabilityMetadata[] {
+  const registry = buildRegistry(env);
+  for (const platform of openCliCapabilities(catalog)) {
+    const site = platform.slice('opencli:'.length);
+    registry.register(new OpenCliProvider(site, { catalog }));
+  }
+  return safeSocialCapabilityMetadata(registry.socialCapabilities());
+}
+
+export function workerCapabilityMetadata(
+  catalog: readonly OpenCliCommand[],
+  env: NodeJS.ProcessEnv = process.env,
+): WorkerCapabilityMetadata {
+  return { socialCapabilities: workerSocialCapabilityMetadata(catalog, env) };
+}
+
+function reportCapabilityMetadata(registry: ProviderRegistry): WorkerCapabilityMetadata {
+  return { socialCapabilities: safeSocialCapabilityMetadata(registry.socialCapabilities()) };
+}
+
+function sourceIdFromOptions(options: Record<string, unknown>): string | undefined {
+  const sourceId = typeof options['sourceId'] === 'string' ? options['sourceId'].trim() : '';
+  return sourceId || undefined;
+}
+
+/**
+ * 报告出 Worker 边界前统一做两件事：把已支持社媒 item 绑定标准 envelope，
+ * 并把所有 item 的 raw 递归脱敏。分析核心仍只见原始 SourceItem。
+ */
+function prepareWorkerReport(
+  report: unknown,
+  registry: ProviderRegistry,
+  options: Record<string, unknown> = {},
+): unknown {
+  if (!report || typeof report !== 'object' || Array.isArray(report)) return report;
+  const value = report as Record<string, unknown>;
+  const withSocial = attachSocialObservationEnvelope(value, {
+    ...(sourceIdFromOptions(options) ? { sourceId: sourceIdFromOptions(options) } : {}),
+  });
+  return {
+    ...withSocial,
+    capabilityMetadata: reportCapabilityMetadata(registry),
+  };
+}
+
 async function credentialsFor(
   config: WorkerConfig,
   capabilities: readonly string[],
   signal: AbortSignal,
   direct?: DirectAgentConfig | null,
   browserAttestation?: BrowserProfileAttestation,
+  capabilityMetadata: WorkerCapabilityMetadata = { socialCapabilities: [] },
 ): Promise<NodeCredentials> {
   if (config.nodeId && config.nodeToken) return { id: config.nodeId, token: config.nodeToken };
   if (!config.registrationKey) {
@@ -304,6 +369,7 @@ async function credentialsFor(
           browserEndpointConfigured: Boolean(process.env['OPENCLI_CDP_ENDPOINT']?.trim()),
           ...(browserAttestation ? { browserAttestation } : {}),
           cpuCount: cpus().length,
+          capabilityMetadata,
         },
       },
     },
@@ -519,11 +585,12 @@ export async function executeCreatorOwned(job: ControlJob, registry: ProviderReg
   const provider = registry.resolve(job.platform, 'fetchOwned');
   if (!provider?.fetchOwned) throw new Error(`平台 ${job.platform} 没有已启用的 fetchOwned Provider`);
   const bundle = await provider.fetchOwned({ grantHandle, limit: job.limit });
-  return attachWorkflowExecution({
+  const report = attachWorkflowExecution({
     painPoints: [], items: bundle.items, provenance: bundle.provenance,
     stats: { totalTexts: bundle.items.length, clusteredTexts: 0, clusterCount: 0, noiseCount: 0, summarizedClusters: 0, skippedClusters: 0 },
     dataQuality: 'authorized-first-party', keyword: job.keyword, generatedAt: new Date().toISOString(), acquisitionMode: 'fetchOwned',
   }, options);
+  return prepareWorkerReport(report, registry, options);
 }
 
 async function executeJob(job: ControlJob, catalog: readonly OpenCliCommand[]): Promise<unknown> {
@@ -561,12 +628,13 @@ async function executeJob(job: ControlJob, catalog: readonly OpenCliCommand[]): 
     if (!provider?.searchAll) throw new Error(`平台 ${job.platform} 不支持连接测试`);
     const bundle = await provider.searchAll({ keyword: job.keyword, limit: job.limit, includeComments: false });
     const cursor = provider instanceof GenericSourceProvider ? provider.cursor() : {};
-    return attachWorkflowExecution({
+    const report = attachWorkflowExecution({
       painPoints: [], items: bundle.items, provenance: bundle.provenance,
       stats: { totalTexts: bundle.items.length, clusteredTexts: 0, clusterCount: 0, noiseCount: 0, summarizedClusters: 0, skippedClusters: 0 },
       dataQuality: 'exploratory', keyword: job.keyword, generatedAt: new Date().toISOString(),
       sourceCursor: cursor, sourceTest: true,
     }, options);
+    return prepareWorkerReport(report, registry, options);
   }
   const report = await analyze(
     {
@@ -584,10 +652,11 @@ async function executeJob(job: ControlJob, catalog: readonly OpenCliCommand[]): 
     },
   );
   const provider = registry.resolve(job.platform, 'searchAll');
-  return attachWorkflowExecution({
+  const output = attachWorkflowExecution({
     ...report,
     ...(provider instanceof GenericSourceProvider ? { sourceCursor: provider.cursor() } : {}),
   }, options);
+  return prepareWorkerReport(output, registry, options);
 }
 
 function directAuthorized(request: IncomingMessage, token: string): boolean {
@@ -901,6 +970,11 @@ export async function runWorker(env: NodeJS.ProcessEnv = process.env): Promise<v
   }
   const capabilities = availablePlatforms(openCliCatalog, effectiveEnv, browserAttestation);
   if (capabilities.length === 0) throw new Error('当前节点没有可用的数据源能力');
+  // Gateway 模式把数据能力交给 Gateway 聚合；控制面节点自身不应同时声明一份
+  // 可派发的 social catalog，避免 runtime metadata 与 capabilities_json 分叉。
+  const capabilityMetadata = gatewayConfig
+    ? { socialCapabilities: [] as readonly SocialCapabilityMetadata[] }
+    : workerCapabilityMetadata(openCliCatalog, effectiveEnv);
 
   const controller = new AbortController();
   const stop = () => controller.abort();
@@ -922,7 +996,7 @@ export async function runWorker(env: NodeJS.ProcessEnv = process.env): Promise<v
     const agentSkillReady = !gatewayConfig && Boolean(effectiveEnv['OPENCLI_CDP_ENDPOINT']?.trim()
       && effectiveEnv['LLM_API_KEY']?.trim() && effectiveEnv['LLM_MODEL']?.trim());
     const controlCapabilities: string[] = gatewayConfig ? [] : [...capabilities, ...(agentSkillReady ? ['agent-skill'] : [])];
-    const credentials = await credentialsFor(config, controlCapabilities, controller.signal, gatewayConfig ? null : directConfig, browserAttestation); const activeJobs = new Set<string>();
+    const credentials = await credentialsFor(config, controlCapabilities, controller.signal, gatewayConfig ? null : directConfig, browserAttestation, capabilityMetadata); const activeJobs = new Set<string>();
     console.log(`节点 ${config.nodeName} 已上线；能力 ${gatewayConfig ? 'browser-only' : capabilities.join(', ')}；并发 ${config.concurrency}`);
     const sendHeartbeat = async () => {
       if (Date.parse(browserAttestation.expiresAt) - Date.now() < 30_000) browserAttestation = await attestBrowserProfile(effectiveEnv);
@@ -948,6 +1022,7 @@ export async function runWorker(env: NodeJS.ProcessEnv = process.env): Promise<v
             browserEndpointConfigured: Boolean(effectiveEnv['OPENCLI_CDP_ENDPOINT']?.trim()),
             browserAttestation,
             cpuCount: cpus().length,
+            capabilityMetadata,
             opencli: openCliRuntime ? {
               ready: true,
               version: openCliRuntime.version,

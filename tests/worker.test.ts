@@ -2,7 +2,8 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { directAgentConfigFromEnv, gatewayWorkerConfigFromEnv, loadWorkerStateFile, saveWorkerStateFile, startDirectAgentServer, workerConfigFromEnv, workerEnvWithState } from '../src/worker.js';
+import { directAgentConfigFromEnv, gatewayWorkerConfigFromEnv, loadWorkerStateFile, saveWorkerStateFile, startDirectAgentServer, workerCapabilityMetadata, workerConfigFromEnv, workerEnvWithState } from '../src/worker.js';
+import type { OpenCliCommand } from '../src/providers/opencli.js';
 
 describe('workerConfigFromEnv', () => {
   it('normalizes the control URL and applies bounded defaults', () => {
@@ -95,5 +96,29 @@ describe('worker credential state', () => {
     expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({ id: 'node-one', token: '0123456789abcdef' });
     expect(await workerEnvWithState({ THREADBEACON_WORKER_STATE_FILE: path })).toMatchObject({ THREADBEACON_NODE_ID: 'node-one', THREADBEACON_NODE_TOKEN: '0123456789abcdef' });
     expect(await workerEnvWithState({ THREADBEACON_WORKER_STATE_FILE: path, THREADBEACON_NODE_ID: 'explicit' })).not.toHaveProperty('THREADBEACON_NODE_TOKEN');
+  });
+});
+
+describe('worker social capability metadata', () => {
+  it('projects registered native and dynamic providers without credentials', () => {
+    const catalog: OpenCliCommand[] = [{
+      site: 'zhihu', name: 'search', command: 'search', access: 'read',
+    }];
+    const metadata = workerCapabilityMetadata(catalog, {
+      YOUTUBE_API_KEY: 'youtube-secret-key',
+      REDDIT_CLIENT_ID: 'reddit-client-id',
+      REDDIT_CLIENT_SECRET: 'reddit-client-secret',
+    });
+    expect(metadata.socialCapabilities).toEqual(expect.arrayContaining([
+      expect.objectContaining({ platform: 'bluesky', tier: 'official', canRead: true, canWrite: false }),
+      expect.objectContaining({ platform: 'opencli:zhihu', tier: 'experimental', readiness: 'experimental' }),
+    ]));
+    const serialized = JSON.stringify(metadata);
+    expect(serialized).not.toContain('youtube-secret-key');
+    expect(serialized).not.toContain('reddit-client-secret');
+    expect(serialized).not.toContain('authorization');
+    expect(metadata.socialCapabilities.every((entry) => (
+      entry.write.enabled === false && entry.write.requiresApproval === true
+    ))).toBe(true);
   });
 });

@@ -1,4 +1,19 @@
 export type JsonRecord = Record<string, unknown>;
+export type SocialSection = 'overview' | 'monitors' | 'content' | 'accounts' | 'insights' | 'alerts';
+export type SocialFilters = {
+  platform?: string;
+  status?: string;
+  query?: string;
+  /** Server-side alias used by the project social read endpoints. */
+  search?: string;
+  changeType?: string;
+  sentiment?: string;
+  topic?: string;
+  severity?: string;
+  monitorId?: string;
+  limit?: number;
+  cursor?: string;
+};
 
 export class V2ApiError extends Error {
   readonly status: number;
@@ -98,6 +113,68 @@ export function text(value: unknown, fallback = '—'): string {
 
 const encoded = (value: string) => encodeURIComponent(value);
 
+function withQuery(path: string, filters: SocialFilters = {}, keys?: readonly string[]): string {
+  const params = new URLSearchParams();
+  const entries = keys ? keys.map(key => [key, filters[key as keyof SocialFilters]] as const) : Object.entries(filters);
+  for (const [key, value] of entries) {
+    if (value === undefined || value === null || value === '') continue;
+    params.set(key, String(value));
+  }
+  const query = params.toString();
+  return query ? `${path}?${query}` : path;
+}
+
+function socialPath(projectId: string, section: SocialSection, filters: SocialFilters): string {
+  // The v2 read endpoints intentionally expose different server-side filters.
+  // Keep UI-only filters local while translating the shared client shape here.
+  if (section === 'monitors') {
+    const status = ['active', 'paused', 'error', 'disabled'].includes(filters.status ?? '') ? filters.status : undefined;
+    return withQuery(`/projects/${encoded(projectId)}/social/${section}`, { status, search: filters.query }, ['status', 'search']);
+  }
+  if (section === 'content') {
+    const changeType = ['baseline', 'new', 'changed', 'unchanged'].includes(filters.status ?? '') ? filters.status : undefined;
+    const platform = filters.platform?.toLowerCase() === 'opencli' ? undefined : filters.platform;
+    return withQuery(`/projects/${encoded(projectId)}/social/${section}`, {
+      search: filters.query,
+      platform,
+      changeType,
+      monitorId: filters.monitorId,
+      limit: filters.limit,
+      cursor: filters.cursor,
+    }, ['search', 'platform', 'changeType', 'monitorId', 'limit', 'cursor']);
+  }
+  if (section === 'accounts') {
+    const platform = filters.platform?.toLowerCase() === 'opencli' ? undefined : filters.platform;
+    return withQuery(`/projects/${encoded(projectId)}/social/${section}`, {
+      search: filters.query,
+      platform,
+      limit: filters.limit,
+      cursor: filters.cursor,
+    }, ['search', 'platform', 'limit', 'cursor']);
+  }
+  if (section === 'alerts') {
+    const status = ['open', 'resolved', 'ignored', 'all'].includes(filters.status ?? '') ? filters.status : 'all';
+    return withQuery(`/projects/${encoded(projectId)}/social/${section}`, {
+      status,
+      search: filters.query,
+      monitorId: filters.monitorId,
+      limit: filters.limit,
+      cursor: filters.cursor,
+    }, ['status', 'search', 'monitorId', 'limit', 'cursor']);
+  }
+  return `/projects/${encoded(projectId)}/social/${section}`;
+}
+
+function globalSocialAlertsPath(filters: SocialFilters = {}): string {
+  const status = ['open', 'resolved', 'ignored', 'all'].includes(filters.status ?? '') ? filters.status : 'all';
+  return withQuery('/social/alerts', {
+    status,
+    search: filters.query,
+    limit: filters.limit,
+    cursor: filters.cursor,
+  }, ['status', 'search', 'limit', 'cursor']);
+}
+
 export const v2 = {
   context: () => v2Request<unknown>('/me/context'),
   attention: () => v2Request<unknown>('/attention'),
@@ -147,6 +224,19 @@ export const v2 = {
   }),
   deliveries: (id: string) => v2Request<unknown>(`/projects/${encoded(id)}/deliveries`),
   delivery: (id: string) => v2Request<unknown>(`/deliveries/${encoded(id)}`),
+
+  socialOverview: () => v2Request<unknown>('/social/overview'),
+  globalSocialAlerts: (filters: SocialFilters = {}) => v2Request<unknown>(globalSocialAlertsPath(filters)),
+  projectSocial: (projectId: string, section: SocialSection = 'overview', filters: SocialFilters = {}) =>
+    v2Request<unknown>(socialPath(projectId, section, filters)),
+  createSocialMonitor: (projectId: string, body: JsonRecord) =>
+    v2Request<unknown>(`/projects/${encoded(projectId)}/social/monitors`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+      body,
+    }),
+  updateSocialMonitor: (projectId: string, monitorId: string, body: JsonRecord) =>
+    v2Request<unknown>(`/projects/${encoded(projectId)}/social/monitors/${encoded(monitorId)}`, { method: 'PATCH', body }),
 
   automations: () => v2Request<unknown>('/automations'),
   capabilitiesReadiness: () => v2Request<unknown>('/capabilities/readiness'),

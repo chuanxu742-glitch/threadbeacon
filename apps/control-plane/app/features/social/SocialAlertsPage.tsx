@@ -1,0 +1,15 @@
+import { useState } from 'react';
+import { EmptyState } from '../../components/states.js';
+import { JsonDetails, StatusBadge } from '../../components/ui.js';
+import { Link } from '../../routes/router.js';
+import { DataState, list, pickId, value } from '../shared.js';
+import { ProjectFrame } from '../projects/ProjectFrame.js';
+import { applySocialFilters, safeRemediationRoute, SocialCapabilityBadges, SocialFilterBar, SocialPageHeader, SocialReadOnlyNote, useSocialQuery } from './social-shared.js';
+
+export function SocialAlertsPage({ projectId }: { projectId?: string }) {
+  const [filters, setFilters] = useState({ platform: '', status: '', query: '', severity: '' });
+  const query = useSocialQuery(projectId, 'alerts', filters);
+  const alerts = applySocialFilters(list(query.data, 'alerts', 'items'), filters);
+  const page = <div className="tb-page tb-social-page"><SocialPageHeader eyebrow={projectId ? 'PROJECT SOCIAL / ALERTS' : 'SOCIAL / ALERTS'} title="告警" description="显示采集失败、平台授权、连接和数据质量告警；每条告警保留服务端状态和修复入口。" projectId={projectId} active="alerts" actions={<Link to={projectId ? `/projects/${encodeURIComponent(projectId)}/social` : '/social'} className="tb-button tb-button-secondary">社媒总览</Link>}/><SocialFilterBar filters={filters} onChange={next => setFilters({ platform: next.platform ?? '', status: next.status ?? '', query: next.query ?? '', severity: next.severity ?? '' })} includeSeverity/><section className="tb-card"><header className="tb-card-header"><div><p className="tb-eyebrow">ACTIONABLE ALERTS</p><h2>社媒告警</h2><p>告警是只读投影；需要处理时回到项目设置或连接授权页。</p></div><span className="tb-count-pill">{alerts.length} 条</span></header><DataState loading={query.loading} error={query.error} retry={query.retry} empty={<EmptyState title="暂无社媒告警" description="v2 尚未返回平台、采集或授权异常。"/>}>{alerts.length === 0 ? <EmptyState title="暂无社媒告警" description="当前筛选下没有待处理的社媒告警。"/> : <div className="tb-social-alert-page-list">{alerts.map((item, index) => {const project = value(item, 'projectId', ''); const route = safeRemediationRoute(item.remediationRoute ?? item.remediation_route); return <article key={pickId(item) || index}><div className="tb-social-alert-mark">!</div><div><header><strong>{value(item, 'title', value(item, 'message', '社媒告警'))}</strong><StatusBadge value={item.severity ?? item.status ?? 'unknown'}/></header><p>{value(item, 'description', value(item, 'reason', '未提供告警说明'))}</p><small>{value(item, 'platform', '平台未提供')} · {value(item, 'affectedObject', value(item, 'monitorId', '对象未提供'))} · {value(item, 'createdAt', value(item, 'lastCheckedAt', '时间未提供'))}</small><SocialCapabilityBadges item={item}/></div><div className="tb-social-alert-actions">{project && <Link to={`/projects/${encodeURIComponent(project)}/social`}>项目 →</Link>}{route && <Link to={route}>修复 →</Link>}</div></article>})}</div>}</DataState><JsonDetails value={query.data} label="查看告警响应"/></section><SocialReadOnlyNote>告警页不提供确认、重试或外部平台写操作；服务端未提供修复路由时只保留真实错误和关联信息。</SocialReadOnlyNote></div>;
+  return projectId ? <ProjectFrame projectId={projectId} section="social">{page}</ProjectFrame> : page;
+}

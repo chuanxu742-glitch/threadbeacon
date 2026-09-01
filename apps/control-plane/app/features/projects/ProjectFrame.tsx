@@ -7,7 +7,7 @@ import { Link } from '../../routes/router.js';
 import { ProjectNav } from '../../shell/ProjectNav.js';
 import { value } from '../shared.js';
 
-export function ProjectFrame({ projectId, section, children }: { projectId: string; section: 'overview' | 'orchestration' | 'operations' | 'data' | 'delivery' | 'settings'; children: ReactNode }) {
+export function ProjectFrame({ projectId, section, children }: { projectId: string; section: 'overview' | 'social' | 'orchestration' | 'operations' | 'data' | 'delivery' | 'settings'; children: ReactNode }) {
   const project = useApiQuery(() => v2.project(projectId), [projectId]);
   const record = asRecord(project.data);
   const entity = asRecord(record.project ?? project.data);

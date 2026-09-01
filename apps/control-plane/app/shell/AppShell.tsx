@@ -12,6 +12,7 @@ type NavItem = { href: string; label: string; caption: string; icon: string; mat
 const navItems: NavItem[] = [
   { href: '/today', label: '今天', caption: '待处理与系统脉搏', icon: '◌', matches: path => path === '/today' },
   { href: '/projects', label: '项目', caption: '持续研究与流程', icon: '◈', matches: path => path.startsWith('/projects') },
+  { href: '/social', label: '社媒态势', caption: '监听、内容与洞察', icon: '◎', matches: path => path.startsWith('/social') },
   { href: '/reports', label: '报告', caption: '发现、证据与版本', icon: '▤', matches: path => path.startsWith('/reports') },
   { href: '/automation', label: '自动化', caption: '重复运行的方法', icon: '◇', matches: path => path.startsWith('/automation') },
   { href: '/setup', label: '设置中心', caption: '就绪度与运行资源', icon: '⚙', matches: path => path.startsWith('/setup') || path.startsWith('/settings') },

@@ -11,7 +11,7 @@ export function MetricCard({ label, value, caption, tone = 'blue' }: { label: st
 
 export function StatusBadge({ value }: { value: unknown }) {
   const status = typeof value === 'string' && value.trim() ? value : 'unknown';
-  const labels: Record<string, string> = { ready: '就绪', succeeded: '成功', success: '成功', running: '运行中', queued: '排队中', blocked: '阻塞', failed: '失败', cancelled: '已取消', pending_review: '待复核', approved: '已批准', unknown: '未知', degraded: '降级' };
+  const labels: Record<string, string> = { ready: '就绪', succeeded: '成功', success: '成功', running: '运行中', queued: '排队中', pending: '待处理', blocked: '阻塞', failed: '失败', cancelled: '已取消', pending_review: '待复核', approved: '已批准', unknown: '未知', degraded: '降级' };
   return <span className={`tb-status tb-status-${status}`}>{labels[status] ?? status}</span>;
 }
 

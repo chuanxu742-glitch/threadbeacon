@@ -1,0 +1,15 @@
+import { useState } from 'react';
+import { EmptyState } from '../../components/states.js';
+import { JsonDetails, StatusBadge } from '../../components/ui.js';
+import { Link } from '../../routes/router.js';
+import { DataState, list, pickId, value } from '../shared.js';
+import { ProjectFrame } from '../projects/ProjectFrame.js';
+import { applySocialFilters, SocialCapabilityBadges, SocialFilterBar, SocialPageHeader, SocialReadOnlyNote, useSocialQuery } from './social-shared.js';
+
+export function SocialAccountsPage({ projectId }: { projectId?: string }) {
+  const [filters, setFilters] = useState({ platform: '', status: '', query: '' });
+  const query = useSocialQuery(projectId, 'accounts', filters);
+  const accounts = applySocialFilters(list(query.data, 'accounts', 'items'), filters);
+  const page = <div className="tb-page tb-social-page"><SocialPageHeader eyebrow={projectId ? 'PROJECT SOCIAL / ACCOUNT PROJECTIONS' : 'SOCIAL / ACCOUNT PROJECTIONS'} title="账号投影与来源连接" description={projectId ? '账号由项目 Observation 聚合派生，连接与授权状态仅作能力标注；不会泄露 secret，也不会代表连接已经可运行。' : '全局入口展示 /api/v2/social/overview 返回的账号投影样本；账号由 Observation 聚合派生，完整项目范围请进入具体项目。'} projectId={projectId} active="accounts" actions={<Link to={projectId ? `/projects/${encodeURIComponent(projectId)}/social` : '/setup'} className="tb-button tb-button-secondary">查看设置中心</Link>}/><SocialFilterBar filters={filters} onChange={next => setFilters({ platform: next.platform ?? '', status: next.status ?? '', query: next.query ?? '' })}/><section className="tb-card"><header className="tb-card-header"><div><p className="tb-eyebrow">OBSERVATION-DERIVED ACCESS</p><h2>账号投影 / 来源连接</h2><p>账号不是独立 provider 资源，而是从 Observation 中聚合出的可追溯投影；授权只用于允许的读取范围。</p></div><span className="tb-count-pill">{accounts.length} 个</span></header><DataState loading={query.loading} error={query.error} retry={query.retry} empty={<EmptyState title="暂无账号投影" description="v2 尚未返回项目或工作区的 Observation 账号投影。"/>}>{accounts.length === 0 ? <EmptyState title="暂无账号投影" description="当前筛选下没有可展示的账号投影或来源连接。"/> : <div className="tb-social-account-grid">{accounts.map((item, index) => <article key={pickId(item) || index}><header><span className="tb-social-account-mark">◎</span><StatusBadge value={item.status ?? item.connectionStatus ?? 'unknown'}/></header><h3>{value(item, 'name', value(item, 'displayName', value(item, 'handle', value(item, 'username', '未命名账号'))))}</h3><p>{value(item, 'platform', value(item, 'platformName', '平台未提供'))} · {value(item, 'accountType', value(item, 'type', 'Observation 投影'))}</p><SocialCapabilityBadges item={item}/><dl><div><dt>授权范围</dt><dd>{value(item, 'scopes', value(item, 'authorizationScope', '未提供'))}</dd></div><div><dt>最后检查</dt><dd>{value(item, 'lastCheckedAt', value(item, 'latestSeenAt', value(item, 'updatedAt', '时间未提供')))}</dd></div></dl></article>)}</div>}</DataState><JsonDetails value={query.data} label="查看账号投影与连接响应"/></section><SocialReadOnlyNote>这里仅展示 Observation 派生的账号投影和读取授权状态；不会执行发帖、评论、点赞、关注或私信。</SocialReadOnlyNote></div>;
+  return projectId ? <ProjectFrame projectId={projectId} section="social">{page}</ProjectFrame> : page;
+}
