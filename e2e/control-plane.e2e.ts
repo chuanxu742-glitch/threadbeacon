@@ -40,7 +40,7 @@ test('关键研究闭环与只读社媒域可在浏览器完成', async ({ page 
   await page.getByLabel('类型').fill('web');
   await page.getByLabel('目标').fill('https://example.com/');
   await page.getByRole('button', { name: '保存来源' }).click();
-  await expect(page.getByText(sourceName)).toBeVisible();
+  await expect(page.locator('.tb-source-list').getByText(sourceName, { exact: true })).toBeVisible();
 
   await page.goto(`/projects/${projectId}/orchestration`);
   await page.getByPlaceholder('新流程名称').fill(workflowName);
