@@ -4,15 +4,17 @@
 采集、分析、出处追溯与交付流程。既可作为 CLI 单机运行，也可由 Java Web 控制平面和多个
 TypeScript Worker 组成分布式平台。
 
-> **产品阶段：alpha / 设计伙伴验证。** 当前执行、治理和自托管骨架较完整，但项目化报告、
-> 不可变观测版本、研究模板语义和发现复核仍在打磨。项目不承诺全网覆盖，也不是法证取证工具。
+> **产品阶段：alpha / 设计伙伴验证。** 项目化 v2 控制面、不可变观测、发现复核、版本化报告、
+> 交付状态和只读社媒监听闭环已经落地；真实来源覆盖、长期运行与设计伙伴价值仍需继续验证。
+> 项目不承诺全网覆盖，也不是法证取证工具。
 > 产品定位、竞争研究和验证门槛见 [`docs/深度产品研究与战略决策.md`](./docs/深度产品研究与战略决策.md)。
 
-Web 控制面现已提供项目模板与真实来源运行时、可视化多来源 DAG（分支/汇聚）、草稿与不可变发布版本、
-节点级检查点和事件追踪、证据与记录关系投影、执行节点/浏览器配置档案、插件能力目录、
-定时与 Webhook 触发、加密投递规则及审计日志。RSS/Atom、只读 REST API 与公开网页可以登记、试运行、
-绑定工作流并持久化增量游标。当前默认自托管控制面已经切换为 Java；Java 主链路已包含企业 OIDC、
-安全 Dify DSL 导入、带 scope 的 PAT Bearer 鉴权与可调用的 MCP tools。旧 TypeScript 控制面已移除。
+Web 控制面以 Workspace → Project 为唯一业务入口，覆盖 Workflow Draft/Validate/Version、Run/Trace、
+Observation/Record、Finding/Review、Report Version、Delivery/Attention 和 Readiness。全局 `/social` 与
+项目内社媒工作台提供 Monitor、监听流、账号/内容投影、趋势洞察和告警；P0 只读取公开或明确授权数据，
+不提供自动发帖、评论、点赞或私信。RSS/Atom、只读 REST API 与公开网页可以登记、试运行、绑定工作流并
+持久化增量游标。默认自托管控制面为 Java；主链路包含企业 OIDC、安全 Dify DSL 导入、带 scope 的 PAT
+Bearer 鉴权与可调用的 MCP tools。旧 TypeScript 控制面和 `/studio#tab` 主路径已移除。
 
 License: Apache-2.0 · Node ≥ 22 · TypeScript strict
 
@@ -52,7 +54,7 @@ License: Apache-2.0 · Node ≥ 22 · TypeScript strict
 | `postedAt` / `timeBucket` | 精确发布时刻，以及派生的日期 |
 | `itemType` / `parentId` | 帖子还是评论；评论指回所属帖子 |
 | `metrics` | 点赞 / 评论 / 转发 / 播放 |
-| `raw` | 平台特有字段原样留存 |
+| `raw` | 平台特有字段；在 Worker 输出边界剔除 token/cookie/session/signature 等凭据类字段 |
 
 丢字段比多留字段更难补救 —— 重新采集要重新烧配额，而原帖可能已经删了。
 
@@ -113,10 +115,10 @@ pnpm xhs:login                             # 小红书扫码登录（仅用 Spid
 
 ## Web 控制平面与分布式执行
 
-当前 Java 控制平面包含品牌化登录页（本地账号或可选 OIDC）、任务队列、周期计划、失败重试/取消、执行节点监控、逐条数据记录、
-跨任务去重、搜索、多来源工作流版本与来源级 Trace、证据链、审计日志、Webhook 触发、受控浏览器会话、
-GEO 执行和报告下载。任务、工作流、节点、标准化记录与治理数据保存到 PostgreSQL，完整 JSON 报告保存到 S3/MinIO；
-采集凭据只留在 Worker，控制平面不保存平台 API key 或浏览器登录态。
+当前 Java 控制平面按 workspace/project/source/workflow/run/research/social/report/delivery/attention/capability
+拆分领域边界，提供项目化运行、版本与复核、只读社媒监听、周期计划、失败恢复、执行节点监控、证据链、
+审计、Webhook、受控浏览器和 GEO 执行。业务元数据与不可变 Observation 保存到 PostgreSQL，完整报告和截图
+保存到 S3/MinIO；采集凭据只留在 Worker，控制平面不保存平台 API key 或浏览器登录态。
 
 通用来源只执行 GET。每个请求都会阻断本机/私网/链路本地/保留地址，对 DNS 结果固定连接，
 并在每次重定向后重新校验；网页来源先检查 `robots.txt`，响应体限制为 5 MiB。REST 密钥配置
@@ -124,13 +126,17 @@ GEO 执行和报告下载。任务、工作流、节点、标准化记录与治�
 Last-Modified，下一轮自动发出条件请求；来源的最近成功、连续失败和最后错误保存在 PostgreSQL。
 
 ```text
-浏览器 → React 静态管理台 → Spring Boot 控制平面
-                                  ↓
-                         PostgreSQL 任务 / 工作流 / 租约
-                         ↓ 到期入队 / 抢单 / 心跳
-                    多个 ThreadBeacon Worker
-                         ↓ 完成回传
-                       S3 / MinIO 报告库
+浏览器 → React 项目化管理台 → Spring Boot v2 控制平面
+                                      ↓
+ Workspace → Project → Workflow Version → Run
+                                      ↓
+                     PostgreSQL / Flyway / 租约与审计
+                         ↓ 抢单 / 心跳 / capability metadata
+                        多个 ThreadBeacon Worker
+                         ↓ 标准 social envelope / 完成回传
+ Observation → Finding/Review → Report Version → Delivery
+                                      ↓
+                              S3 / MinIO 产物库
 ```
 
 Docker 是可选部署方式。原生启动仍需要可连接的 PostgreSQL 与 S3/MinIO；安装 Java 17+、Node 22+、
@@ -183,7 +189,7 @@ LLM 凭据；控制平面只会把平台匹配的任务派给该节点。`THREAD
 
 工作流支持 1–10 个来源和任意无环分支/汇聚。每个来源生成独立任务并按 Worker 能力路由，
 控制平面通过 `workflow_run_jobs` 聚合运行状态；任一来源最终失败会停止同运行的其他来源。
-运行级取消/重试、节点检查点和事件 Trace 均可在 Studio 中操作。OpenCLI 目录由 Worker 启动时
+运行级取消/重试、节点检查点和事件 Trace 均可在项目运行页操作。OpenCLI 目录由 Worker 启动时
 动态发现并核对实际二进制版本；CDP 未配置或健康检查失败时不会上报依赖浏览器的能力，避免任务
 被路由到实际不可执行的节点。当前锁定版本扫描到 1,257 条命令；无 CDP 时有 316 条只读命令、79 个站点可调度，需要时可为来源显式指定只读 command/args。
 GEO 按参考项目的受控能力方式发布 `official-site.observe@1.0.0`，复用现有任务队列、取消/重试、
@@ -340,6 +346,10 @@ git clone https://github.com/liangdabiao/SeekMoney-ai reference/SeekMoney-ai
   HTTPS 地址并拒绝内网目标，任务完成后自动投递且不影响主任务落库
 - 数据资产：任务完成后把每条标准化内容写入记录中心，按用户、平台和来源 ID 跨任务去重，
   保留首次/最近任务、重复次数、原始 JSON，并支持正文、标题、作者和平台筛选
+- 社媒工作台：全局态势与项目内 Monitor/监听流/账号/内容/洞察/告警；Worker 将七个平台家族统一为
+  `threadbeacon.social.observation.v1`，能力按 official/licensed/experimental 分级，P0 全部只读
+- 可信交付链：Project → immutable Observation → Finding revision/review → immutable Report Version →
+  Delivery Operation/Attempt/Outcome；失败、阻塞和未知状态进入统一 Attention 投影
 - 分布式 Worker：节点密钥注册、Bearer 身份验证、能力上报、心跳续租、按能力抢单、
   有界并发执行和完整报告回传；CLI 与 Worker 共用同一采集运行时
 - 调度与远程执行：标准 5 字段 Cron、IANA 时区、DST 处理、暂停/恢复/立即运行；默认
@@ -366,7 +376,7 @@ git clone https://github.com/liangdabiao/SeekMoney-ai reference/SeekMoney-ai
   并补了 `DataCleaner.clean()` 的 `indices` 返回 —— 清洗会过滤与去重，
   没有这个映射就无法把簇成员关联回原始记录
 - LLM 接入层：url/key/model 三项配置，OpenAI 兼容与 Anthropic Messages 双线路
-- 七个 provider：Bluesky Jetstream（实时流、DID→handle 丰富、零凭据）、Bluesky 检索（需凭据，当前不可用）、
+- 七个平台家族：Bluesky Jetstream（实时流、DID→handle 丰富、零凭据）、Bluesky 检索（需凭据，当前不可用）、
   Reddit（官方 API + OAuth，含评论树）、YouTube（Data API v3，含评论），
   以及经 TikHub 接入的小红书 / 抖音 / TikTok（均含评论）
 - 编排层：按模式自动选路，provider → 聚类 → LLM 有界并发归纳 → 洞察与原始数据一并落盘，
@@ -380,12 +390,12 @@ git clone https://github.com/liangdabiao/SeekMoney-ai reference/SeekMoney-ai
 - Reddit / YouTube：主机可达（doctor 全 200），但**尚未用真实凭据跑通** —— 未验证
 
 **下一步**
-1. 拿真实凭据验证四条 TikHub 链路与 Reddit / YouTube（`pnpm smoke:reddit`）
-2. 用自有浏览器登录态验证 Bilibili、知乎、微博、X、LinkedIn 等 OpenCLI 浏览器适配器
-3. `fetchOwned` 模式的 creator API provider
-4. 为 `linux/amd64` / `linux/arm64` 增加真实 Docker Buildx 启动矩阵与恢复演练
-5. 为 PostgreSQL/MinIO 增加自动备份、恢复演练和控制平面多副本滚动升级
-6. Dify code/tool/plugin 的独立强沙箱；在沙箱完成前继续阻断任意代码执行，不以兼容名义降低安全边界
+1. 用真实凭据验证 TikHub、Reddit 与 YouTube，并记录配额、合同和当前 ToS（`pnpm smoke:reddit`）
+2. 用设计伙伴跑通 Monitor → Observation → Finding → Report → Delivery 的两周持续研究闭环
+3. 用自有浏览器登录态验证 Bilibili、知乎、微博、X、LinkedIn 等 OpenCLI 浏览器适配器
+4. 为 PostgreSQL/MinIO 增加自动备份恢复演练和控制平面多副本滚动升级
+5. 为 `linux/amd64` / `linux/arm64` 增加真实 Docker Buildx 启动矩阵与恢复演练
+6. Dify code/tool/plugin 的独立强沙箱；完成前继续阻断任意代码执行，不以兼容名义降低安全边界
 
 ## 平台覆盖
 
@@ -428,6 +438,8 @@ TikHub 那四个平台的字段映射来自上游 SeekMoney-ai 跑通过的解�
 | `docs/备份恢复与升级.md` | PostgreSQL/MinIO 备份恢复、HA 边界与升级检查单 |
 | `docs/发布流程.md` | 开源版本与多架构镜像发布流程 |
 | `docs/产品与架构.md` | 项目背景、解决的问题、后端架构与核心流程节点 |
+| `docs/ThreadBeacon-Razormind形态整体重构计划.md` | 项目化 v2、社媒域、迁移顺序、验收与防补丁规则 |
+| `docs/social-domain-normalization.md` | 社媒统一 envelope、capability/readiness 和合规边界 |
 | `docs/深度产品研究与战略决策.md` | 产品真相审计、竞品研究、首个 ICP、黄金路径与验证门槛 |
 
 ## 参与贡献
