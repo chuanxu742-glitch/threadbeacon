@@ -62,18 +62,21 @@ test('关键研究闭环与只读社媒域可在浏览器完成', async ({ page 
   await page.getByRole('button', { name: '运行此版本' }).click();
 
   await page.goto(`/projects/${projectId}/operations`);
-  await expect(page.getByRole('heading', { name: '运行' })).toBeVisible();
-  await expect(page.getByText(workflowName).or(page.getByText('queued')).first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: '运行', exact: true })).toBeVisible();
+  const runCard = page.locator('.tb-run-list button').first();
+  await expect(runCard).toBeVisible();
+  await expect(runCard.locator('.tb-status')).not.toHaveText('unknown');
 
   await page.goto(`/projects/${projectId}/social`);
-  await expect(page.getByRole('heading', { name: '社媒态势' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '社媒态势', exact: true })).toBeVisible();
   await page.getByLabel('名称').fill(monitorName);
   await page.getByLabel('平台').selectOption('bluesky');
   await page.getByLabel('关键词 / 主题').fill('open source research intelligence');
   await page.getByRole('button', { name: '创建监控' }).click();
-  await expect(page.getByText(monitorName)).toBeVisible();
-  await page.getByRole('button', { name: '暂停' }).click();
-  await expect(page.getByRole('button', { name: '启用' })).toBeVisible();
+  const monitorCard = page.locator('.tb-social-monitor-list article').filter({ hasText: monitorName });
+  await expect(monitorCard.getByText(monitorName, { exact: true })).toBeVisible();
+  await monitorCard.getByRole('button', { name: '暂停', exact: true }).click();
+  await expect(monitorCard.getByRole('button', { name: '启用', exact: true })).toBeVisible();
 
   for (const [path, title] of [
     ['streams', '监听流'],

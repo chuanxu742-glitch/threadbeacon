@@ -217,8 +217,9 @@ export function MonitorManager({ projectId, query }: { projectId: string; query:
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const formElement = event.currentTarget;
     setBusy('new'); setError(null); setResult(null);
-    const form = new FormData(event.currentTarget);
+    const form = new FormData(formElement);
     try {
       const platform = String(form.get('platform') ?? '').trim();
       if (platform.toLowerCase() === 'opencli') throw new Error('OpenCLI 需要先配置具体项目来源，当前不能发送裸 opencli。');
@@ -233,7 +234,7 @@ export function MonitorManager({ projectId, query }: { projectId: string; query:
         enabled: true,
         status: 'active',
       });
-      setResult(response); query.retry(); event.currentTarget.reset();
+      setResult(response); query.retry(); formElement.reset();
     } catch (reason) { setError(reason instanceof Error ? reason : new Error('创建社媒监控失败。')); }
     finally { setBusy(''); }
   }

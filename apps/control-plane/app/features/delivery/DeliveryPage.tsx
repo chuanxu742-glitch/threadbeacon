@@ -17,8 +17,9 @@ export function DeliveryPage({ projectId }: { projectId: string }) {
   const deliveryItems = list(deliveries.data, 'deliveries', 'operations', 'items');
   async function createDelivery(reportId: string, event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(reportId); setError(null); setResult(null);
-    const form = new FormData(event.currentTarget);
-    try { setResult(await v2.createDelivery(reportId, { channel: String(form.get('channel') ?? '').trim(), destination: String(form.get('destination') ?? '').trim(), idempotencyKey: crypto.randomUUID() })); deliveries.retry(); event.currentTarget.reset(); }
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    try { setResult(await v2.createDelivery(reportId, { channel: String(form.get('channel') ?? '').trim(), destination: String(form.get('destination') ?? '').trim(), idempotencyKey: crypto.randomUUID() })); deliveries.retry(); formElement.reset(); }
     catch (reason) { setError(reason instanceof Error ? reason : new Error('创建交付操作失败。')); }
     finally { setBusy(''); }
   }
