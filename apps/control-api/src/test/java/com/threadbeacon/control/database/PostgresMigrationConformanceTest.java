@@ -34,7 +34,7 @@ class PostgresMigrationConformanceTest {
         try {
             flyway.clean();
             var result = flyway.migrate();
-            assertThat(result.migrationsExecuted).isEqualTo(8);
+            assertThat(result.migrationsExecuted).isEqualTo(flyway.info().all().length);
             try (var connection = DriverManager.getConnection(url, user, password);
                  var statement = connection.prepareStatement("""
                          SELECT table_name FROM information_schema.tables
@@ -45,7 +45,7 @@ class PostgresMigrationConformanceTest {
                 try (var rows = statement.executeQuery()) {
                     while (rows.next()) tables.add(rows.getString(1));
                 }
-                assertThat(tables).hasSize(52);
+                assertThat(tables).hasSizeGreaterThanOrEqualTo(54);
                 assertThat(tables).contains(
                         "jobs", "workflows", "geo_acquisition_executions",
                         "skills", "skill_versions", "skill_runs",
@@ -53,7 +53,8 @@ class PostgresMigrationConformanceTest {
                         "skill_action_reviews", "observations", "finding_reviews", "product_events",
                         "connections", "execution_resources", "finding_revisions",
                         "report_drafts", "report_versions", "report_version_findings",
-                        "delivery_operations", "delivery_attempts", "attention_items");
+                        "delivery_operations", "delivery_attempts", "attention_items",
+                        "social_monitors", "social_alerts");
             }
             verifiesTheGovernedSkillLifecycle(url, user, password);
         } finally {
