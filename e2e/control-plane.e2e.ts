@@ -69,10 +69,11 @@ test('关键研究闭环与只读社媒域可在浏览器完成', async ({ page 
 
   await page.goto(`/projects/${projectId}/social`);
   await expect(page.getByRole('heading', { name: '社媒态势', exact: true })).toBeVisible();
-  await page.getByLabel('名称').fill(monitorName);
-  await page.getByLabel('平台').selectOption('bluesky');
-  await page.getByLabel('关键词 / 主题').fill('open source research intelligence');
-  await page.getByRole('button', { name: '创建监控' }).click();
+  const monitorForm = page.locator('.tb-social-monitor-form');
+  await monitorForm.getByLabel('名称').fill(monitorName);
+  await monitorForm.getByLabel('平台').selectOption('bluesky');
+  await monitorForm.getByLabel('关键词 / 主题').fill('open source research intelligence');
+  await monitorForm.getByRole('button', { name: '创建监控', exact: true }).click();
   const monitorCard = page.locator('.tb-social-monitor-list article').filter({ hasText: monitorName });
   await expect(monitorCard.getByText(monitorName, { exact: true })).toBeVisible();
   await monitorCard.getByRole('button', { name: '暂停', exact: true }).click();
