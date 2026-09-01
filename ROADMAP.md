@@ -2,6 +2,8 @@
 
 This file is the source of truth for unfinished product validation. A checked item must have reproducible evidence in tests, CI, or a documented manual run.
 
+The product-shell and architecture migration sequence is governed by `docs/ThreadBeacon-Razormind形态整体重构计划.md`. Product validation remains governed by this Roadmap; implementation work must not bypass the phase exit gates in the migration plan.
+
 ## P0 — product validation gate
 
 Do not expand platform count, generic workflow nodes, Skill machinery, or cluster deployment scope until this gate has evidence. The product thesis and thresholds are documented in `docs/深度产品研究与战略决策.md`.
