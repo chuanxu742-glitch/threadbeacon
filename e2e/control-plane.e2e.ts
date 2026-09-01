@@ -91,12 +91,12 @@ test('关键研究闭环与只读社媒域可在浏览器完成', async ({ page 
     await expect(page.locator('.tb-social-readonly')).toBeVisible();
   }
 
-  const forbiddenWrite = await page.evaluate(async () => {
-    const response = await fetch(`/api/v2/projects/${encodeURIComponent(projectId)}/social/posts`, {
+  const forbiddenWrite = await page.evaluate(async (id) => {
+    const response = await fetch(`/api/v2/projects/${encodeURIComponent(id)}/social/posts`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
     });
     return response.status;
-  });
+  }, projectId);
   expect([404, 405]).toContain(forbiddenWrite);
 
   for (const [path, title] of [
