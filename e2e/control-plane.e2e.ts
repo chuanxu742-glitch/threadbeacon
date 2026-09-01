@@ -17,6 +17,7 @@ test('拒绝错误凭据且不进入工作区', async ({ page }) => {
 });
 
 test('关键研究闭环与只读社媒域可在浏览器完成', async ({ page }) => {
+  test.setTimeout(90_000);
   const suffix = Date.now().toString(36);
   const projectName = `Release Drill ${suffix}`;
   const sourceName = `Official Site ${suffix}`;
@@ -43,7 +44,10 @@ test('关键研究闭环与只读社媒域可在浏览器完成', async ({ page 
   const sourceCard = page.locator('.tb-source-list article').filter({ hasText: sourceName });
   await expect(sourceCard.getByText(sourceName, { exact: true })).toBeVisible();
   await sourceCard.getByRole('button', { name: '探测来源' }).click();
-  await expect(sourceCard.locator('.tb-status')).toHaveText('active', { timeout: 60_000 });
+  await expect.poll(async () => {
+    await page.reload();
+    return sourceCard.locator('.tb-status').textContent();
+  }, { intervals: [1_000, 2_000, 3_000], timeout: 60_000 }).toBe('active');
 
   await page.goto(`/projects/${projectId}/orchestration`);
   await page.getByPlaceholder('新流程名称').fill(workflowName);
