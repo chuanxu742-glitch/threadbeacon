@@ -6,7 +6,7 @@ const password = process.env['E2E_PASSWORD'] ?? 'release-drill-password-2026';
 async function login(page: Page, suppliedPassword = password) {
   await page.goto('/');
   await page.getByLabel('用户名').fill(username);
-  await page.getByLabel('密码', { exact: true }).fill(suppliedPassword);
+  await page.locator('input[name="password"]').fill(suppliedPassword);
   await page.getByRole('button', { name: /登录/ }).click();
 }
 
